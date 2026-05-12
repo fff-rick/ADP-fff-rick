@@ -1,0 +1,19 @@
+# binaries
+bin/
+dist/
+
+# build artifacts
+coverage/
+*.out
+*.test
+
+# env
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
