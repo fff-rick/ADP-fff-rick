@@ -20,6 +20,9 @@ func main() {
 		AdminPassword:     envOrDefault("ADP_ADMIN_PASSWORD", "admin123"),
 		AuthSecret:        envOrDefault("ADP_AUTH_SECRET", "adp-dev-secret"),
 		WorkerSharedToken: envOrDefault("ADP_WORKER_SHARED_TOKEN", "adp-worker-secret"),
+		LLMBaseURL:        os.Getenv("ADP_LLM_BASE_URL"),
+		LLMAPIKey:         os.Getenv("ADP_LLM_API_KEY"),
+		LLMModel:          envOrDefault("ADP_LLM_MODEL", "gpt-4"),
 	}
 
 	server := api.NewServer(cfg)

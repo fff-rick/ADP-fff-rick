@@ -10,8 +10,12 @@ import (
 	"time"
 
 	"adp/internal/auth"
+	"adp/internal/llm"
 	"adp/internal/model"
+	"adp/internal/parser"
+	"adp/internal/policy"
 	"adp/internal/scheduler"
+	"adp/internal/template"
 )
 
 type Config struct {
@@ -20,20 +24,40 @@ type Config struct {
 	AdminPassword     string
 	AuthSecret        string
 	WorkerSharedToken string
+	LLMBaseURL        string
+	LLMAPIKey         string
+	LLMModel          string
 }
 
 type Server struct {
 	config      Config
 	authService *auth.Service
 	store       *scheduler.Store
+	templateEng *template.Engine
+	policyEng   *policy.Engine
+	taskParser  *parser.Parser
 	httpServer  *http.Server
 }
 
 func NewServer(cfg Config) *Server {
+	templateEng := template.NewEngine()
+	policyEng := policy.NewEngine()
+
+	var taskParser *parser.Parser
+	if cfg.LLMBaseURL != "" {
+		llmClient := llm.NewHTTPClient(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel)
+		taskParser = parser.NewParser(llmClient, templateEng, policyEng)
+	} else {
+		taskParser = parser.NewParser(nil, templateEng, policyEng)
+	}
+
 	server := &Server{
 		config:      cfg,
 		authService: auth.NewService(cfg.AdminUsername, cfg.AdminPassword, cfg.AuthSecret),
 		store:       scheduler.NewStore(),
+		templateEng: templateEng,
+		policyEng:   policyEng,
+		taskParser:  taskParser,
 	}
 
 	mux := http.NewServeMux()
@@ -45,6 +69,9 @@ func NewServer(cfg Config) *Server {
 	mux.HandleFunc("GET /api/v1/workers", server.withUserAuth(server.handleListWorkers))
 	mux.HandleFunc("POST /api/v1/workers/register", server.withWorkerAuth(server.handleRegisterWorker))
 	mux.HandleFunc("POST /api/v1/workers/", server.withWorkerAuth(server.handleWorkerActions))
+	mux.HandleFunc("GET /api/v1/templates", server.withUserAuth(server.handleListTemplates))
+	mux.HandleFunc("POST /api/v1/tasks/parse", server.withUserAuth(server.handleParseTask))
+	mux.HandleFunc("POST /api/v1/tasks/run", server.withUserAuth(server.handleRunTask))
 
 	server.httpServer = &http.Server{
 		Addr:              cfg.Addr,
@@ -235,6 +262,116 @@ func (s *Server) handleWorkerCompleteJob(w http.ResponseWriter, workerID, jobID 
 	}
 
 	writeJSON(w, http.StatusOK, job)
+}
+
+// handleListTemplates returns all available command templates.
+func (s *Server) handleListTemplates(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.templateEng.ListTemplates())
+}
+
+type parseTaskRequest struct {
+	Input string `json:"input"`
+}
+
+func (s *Server) handleParseTask(w http.ResponseWriter, r *http.Request) {
+	var req parseTaskRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if req.Input == "" {
+		writeError(w, http.StatusBadRequest, errors.New("input is required"))
+		return
+	}
+
+	intent, err := s.taskParser.Parse(r.Context(), req.Input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	// Run policy risk assessment.
+	intent.RiskLevel = s.policyEng.AssessRisk(*intent)
+
+	writeJSON(w, http.StatusOK, intent)
+}
+
+type runTaskRequest struct {
+	Input      string            `json:"input"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
+func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
+	var req runTaskRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if req.Input == "" {
+		writeError(w, http.StatusBadRequest, errors.New("input is required"))
+		return
+	}
+
+	// 1. Parse NL input.
+	intent, err := s.taskParser.Parse(r.Context(), req.Input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	// 2. Policy engine risk assessment.
+	intent.RiskLevel = s.policyEng.AssessRisk(*intent)
+
+	// 3. Block high-risk tasks from automatic execution.
+	if s.policyEng.IsHighRisk(intent.RiskLevel) {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":         "high risk task requires manual approval",
+			"risk_level":    intent.RiskLevel,
+			"parsed_intent": intent,
+		})
+		return
+	}
+
+	// 4. Resolve template.
+	tmplCode := intent.MatchedTemplate
+	if tmplCode == "" {
+		writeError(w, http.StatusBadRequest, errors.New("no matching template for parsed intent"))
+		return
+	}
+
+	if err := s.policyEng.ValidateTemplate(tmplCode); err != nil {
+		writeError(w, http.StatusForbidden, err)
+		return
+	}
+
+	// 5. Render command from template.
+	tmpl, cmd, err := s.templateEng.Render(tmplCode, req.Parameters)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// 6. Validate rendered command against tool whitelist.
+	if err := s.policyEng.ValidateCommand(cmd); err != nil {
+		writeError(w, http.StatusForbidden, err)
+		return
+	}
+
+	// 7. Create job and enqueue.
+	job := s.store.CreateJob(
+		fmt.Sprintf("[%s] %s", intent.Intent, req.Input),
+		tmpl.ToolType,
+		cmd,
+	)
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"job":              job,
+		"parsed_intent":    intent,
+		"template_code":    tmplCode,
+		"rendered_command": cmd,
+	})
 }
 
 func (s *Server) withUserAuth(next http.HandlerFunc) http.HandlerFunc {
