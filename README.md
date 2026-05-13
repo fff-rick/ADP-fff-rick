@@ -98,15 +98,12 @@ ADP/
 
 ## 当前进度
 
-目前已经开始落实 Phase 1，仓库内已具备以下基础能力：
+目前已经完成 Phase 1 和 Phase 2：
 
-- Go 模块初始化
-- 基础 HTTP 服务
-- 简化登录鉴权
-- Worker 注册与心跳接口
-- 最小任务调度闭环
+- Phase 1：最小调度闭环（HTTP API、JWT 鉴权、Worker 注册/心跳、任务创建/分发/完成）
+- Phase 2：AI 解析与受控执行（LLM 调用接口、自然语言解析、命令模板、工具白名单、策略引擎、MySQL 备份/HTTP 健康检查模板）
 
-详细实现说明见 [docs/phase1.md](./docs/phase1.md)。
+详细实现说明见 [docs/phase1.md](./docs/phase1.md) 和 [log.md](./log.md)。
 
 ## 本地运行
 
@@ -130,3 +127,36 @@ go run ./cmd/worker
 4. 配置参考：
 
 - 环境变量示例见 [configs/app.env.example](./configs/app.env.example)
+
+## Phase 2 新增 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/templates` | 列出所有可用命令模板 |
+| POST | `/api/v1/tasks/parse` | 将自然语言解析为结构化任务 |
+| POST | `/api/v1/tasks/run` | 全链路执行（解析→模板渲染→白名单校验→入队） |
+
+示例：
+
+```bash
+# 解析自然语言任务
+curl -X POST http://127.0.0.1:8080/api/v1/tasks/parse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"每天凌晨备份 MySQL 数据库"}'
+
+# 执行自然语言任务（全链路）
+curl -X POST http://127.0.0.1:8080/api/v1/tasks/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"每天凌晨备份 MySQL 数据库","parameters":{"Password":"mypass","Database":"mydb"}}'
+```
+
+## 下一步
+
+继续进入 Phase 3 时，建议优先补齐：
+
+- AI 任务规划模块（多步骤诊断计划）
+- Nginx 不可访问诊断步骤模板
+- Redis 响应慢诊断步骤模板
+- 执行结果采集与 AI 分析
