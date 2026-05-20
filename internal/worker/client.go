@@ -2,9 +2,12 @@ package worker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -19,6 +22,7 @@ type Client struct {
 	pollInterval time.Duration
 	httpClient   *http.Client
 	registeredID string
+	execTimeout  time.Duration
 }
 
 func NewClient(serverURL, workerToken, name, workerType string, pollInterval time.Duration) *Client {
@@ -31,6 +35,7 @@ func NewClient(serverURL, workerToken, name, workerType string, pollInterval tim
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
+		execTimeout: 30 * time.Second,
 	}
 }
 
@@ -41,6 +46,7 @@ func (c *Client) Run() error {
 	}
 
 	c.registeredID = worker.ID
+	log.Printf("level=INFO component=worker action=register worker_id=%s worker_name=%s worker_type=%s", worker.ID, worker.Name, worker.WorkerType)
 
 	heartbeatTicker := time.NewTicker(10 * time.Second)
 	defer heartbeatTicker.Stop()
@@ -63,11 +69,26 @@ func (c *Client) Run() error {
 			if !ok {
 				continue
 			}
-			if err := c.complete(job.ID, true, "phase1 simulated execution completed"); err != nil {
+			log.Printf("level=INFO component=worker action=job_polled worker_id=%s job_id=%s", c.registeredID, job.ID)
+			output, success := c.executeCommand(job.Command)
+			if err := c.complete(job.ID, success, output); err != nil {
 				return err
 			}
+			log.Printf("level=INFO component=worker action=job_completed worker_id=%s job_id=%s success=%t", c.registeredID, job.ID, success)
 		}
 	}
+}
+
+// executeCommand runs a shell command with timeout and returns combined output.
+func (c *Client) executeCommand(cmd string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.execTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("exit_error: %v\n%s", err, string(out)), false
+	}
+	return string(out), true
 }
 
 func (c *Client) register() (model.Worker, error) {

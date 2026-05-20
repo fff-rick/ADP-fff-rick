@@ -36,10 +36,19 @@ func NewEngine() *Engine {
 			"wc":        true,
 			"sort":      true,
 			"uniq":      true,
+			"ps":        true,
+			"awk":       true,
 		},
 		allowedTemplates: map[string]bool{
 			"mysql_backup":      true,
 			"http_health_check": true,
+			"check_process":     true,
+			"check_port":        true,
+			"read_log_tail":     true,
+			"redis_ping":        true,
+			"redis_info":        true,
+			"redis_slowlog_get": true,
+			"redis_client_list": true,
 		},
 	}
 }
@@ -88,4 +97,23 @@ func (e *Engine) AssessRisk(intent model.TaskIntent) model.RiskLevel {
 // IsHighRisk is a convenience check.
 func (e *Engine) IsHighRisk(level model.RiskLevel) bool {
 	return level == model.RiskLevelHigh
+}
+
+func (e *Engine) MergeRisk(levels ...model.RiskLevel) model.RiskLevel {
+	result := model.RiskLevelLow
+	for _, level := range levels {
+		switch level {
+		case model.RiskLevelHigh:
+			return model.RiskLevelHigh
+		case model.RiskLevelMedium:
+			if result != model.RiskLevelHigh {
+				result = model.RiskLevelMedium
+			}
+		}
+	}
+	return result
+}
+
+func (e *Engine) RequiresManualApproval(level model.RiskLevel) bool {
+	return level == model.RiskLevelMedium || level == model.RiskLevelHigh
 }

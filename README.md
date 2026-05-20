@@ -98,10 +98,13 @@ ADP/
 
 ## 当前进度
 
-目前已经完成 Phase 1 和 Phase 2：
+目前已经完成 Phase 1、Phase 2、Phase 3、Phase 4 和 Phase 5：
 
 - Phase 1：最小调度闭环（HTTP API、JWT 鉴权、Worker 注册/心跳、任务创建/分发/完成）
-- Phase 2：AI 解析与受控执行（LLM 调用接口、自然语言解析、命令模板、工具白名单、策略引擎、MySQL 备份/HTTP 健康检查模板）
+- Phase 2：AI 解析与受控执行（LLM 调用接口、自然语言解析、命令模板、工具白名单、MySQL 备份/HTTP 健康检查模板）
+- Phase 3：故障诊断与分析（AI 任务规划、Nginx/Redis 诊断模板、真实命令执行与结果采集、AI 分析报告输出）
+- Phase 4：风控与人工确认（`waiting_approval`、人工审批接口、全链路审计日志）
+- Phase 5：经验库与可观测性（故障案例入库、历史案例查询、相似建议、Prometheus 指标）
 
 详细实现说明见 [docs/phase1.md](./docs/phase1.md) 和 [log.md](./log.md)。
 
@@ -128,7 +131,9 @@ go run ./cmd/worker
 
 - 环境变量示例见 [configs/app.env.example](./configs/app.env.example)
 
-## Phase 2 新增 API
+## API 总览
+
+### Phase 2 任务 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -136,27 +141,92 @@ go run ./cmd/worker
 | POST | `/api/v1/tasks/parse` | 将自然语言解析为结构化任务 |
 | POST | `/api/v1/tasks/run` | 全链路执行（解析→模板渲染→白名单校验→入队） |
 
+### Phase 3 诊断 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/diagnosis/plan` | 从故障描述生成诊断计划 |
+| POST | `/api/v1/diagnosis/plan/{id}/execute` | 执行诊断计划的所有步骤 |
+| GET | `/api/v1/diagnosis/plan/{id}` | 获取计划及步骤执行结果 |
+| POST | `/api/v1/diagnosis/plan/{id}/analyze` | 分析结果，生成诊断报告 |
+
+### Phase 4 审批与审计 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/approvals/jobs` | 查询待审批任务 |
+| POST | `/api/v1/approvals/jobs/{id}` | 人工批准或驳回任务 |
+| GET | `/api/v1/audit/logs` | 查询审计日志 |
+
+### Phase 5 案例与指标 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/cases` | 查询历史故障案例 |
+| GET | `/api/v1/cases/suggestions` | 获取相似案例与历史建议 |
+| GET | `/metrics` | 导出 Prometheus 文本指标 |
+
 示例：
 
 ```bash
-# 解析自然语言任务
-curl -X POST http://127.0.0.1:8080/api/v1/tasks/parse \
+# 生成 Nginx 诊断计划
+curl -X POST http://127.0.0.1:8080/api/v1/diagnosis/plan \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"input":"每天凌晨备份 MySQL 数据库"}'
+  -d '{"description":"nginx 无法访问，网站打不开了"}'
 
-# 执行自然语言任务（全链路）
-curl -X POST http://127.0.0.1:8080/api/v1/tasks/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"每天凌晨备份 MySQL 数据库","parameters":{"Password":"mypass","Database":"mydb"}}'
+# 执行诊断计划
+curl -X POST http://127.0.0.1:8080/api/v1/diagnosis/plan/plan-000001/execute \
+  -H "Authorization: Bearer $TOKEN"
+
+# 分析诊断结果
+curl -X POST http://127.0.0.1:8080/api/v1/diagnosis/plan/plan-000001/analyze \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 下一步
 
-继续进入 Phase 3 时，建议优先补齐：
+当前已进入 Phase 6，建议优先补齐：
 
-- AI 任务规划模块（多步骤诊断计划）
-- Nginx 不可访问诊断步骤模板
-- Redis 响应慢诊断步骤模板
-- 执行结果采集与 AI 分析
+- `tests/integration` 端到端验收继续扩展
+- Docker Compose 演示环境联调与验收
+- 3 个典型场景的完整功能验收与压测
+- Phase 6 交付材料整理
+
+## 测试
+
+1. 运行当前核心包测试：
+
+```bash
+go test ./internal/api ./internal/scheduler ./internal/analyzer
+```
+
+2. 运行 Phase 6 集成验收测试：
+
+```bash
+go test ./tests/integration/...
+```
+
+说明：
+
+- 当前完整 `go test ./...` 在这台开发机上仍会受本机 Application Control 策略影响，`internal/planner` 的临时测试二进制可能被拦截
+- 已确认与 Phase 4、Phase 5、Phase 6 直接相关的定向测试可以正常运行
+
+## Docker Compose 演示
+
+当前仓库已提供最小演示栈：
+
+- `server`
+- `worker`
+- `prometheus`
+
+启动方式：
+
+```bash
+docker compose -f deploy/docker-compose/docker-compose.yml up --build
+```
+
+启动后可访问：
+
+- ADP Server: `http://127.0.0.1:8080`
+- Prometheus: `http://127.0.0.1:9090`
