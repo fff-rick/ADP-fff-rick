@@ -1,0 +1,17 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/adp-worker ./cmd/worker
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates bash coreutils curl grep iproute2 net-tools procps redis
+
+WORKDIR /app
+COPY --from=builder /out/adp-worker /usr/local/bin/adp-worker
+
+ENTRYPOINT ["adp-worker"]
