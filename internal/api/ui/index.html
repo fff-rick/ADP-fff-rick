@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Command Center</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ADP / AI Dispatch Platform</p>
+        <h1>可控、可审计、可回放的智能运维指挥台</h1>
+      </div>
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+        <button id="login-toggle" class="ghost-button" type="button">登录控制台</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="section-kicker">Industrial Editorial Command Center</p>
+          <h2>不是让 AI 直接乱跑，而是让它在轨道内做判断。</h2>
+          <p class="hero-text">
+            把自然语言目标、诊断计划、审批风控、任务分发和审计回放折叠进同一张控制台里。
+            这个首页既能演示，也能直接作为产品主控页面落地。
+          </p>
+          <div class="hero-badges">
+            <span>Control Plane</span>
+            <span>Worker Cluster</span>
+            <span>Approval Gate</span>
+            <span>Case Memory</span>
+          </div>
+        </div>
+
+        <div class="command-module">
+          <div class="command-head">
+            <span class="module-index">01</span>
+            <div>
+              <h3>任务命令台</h3>
+              <p>支持解析任务、直接入队、生成诊断计划</p>
+            </div>
+          </div>
+
+          <form id="command-form">
+            <label class="field-label" for="command-input">输入运维目标或故障描述</label>
+            <textarea id="command-input" rows="4" placeholder="例如：nginx 无法访问，帮我生成诊断计划"></textarea>
+            <div class="command-actions">
+              <button class="primary-button" type="submit" data-action="parse">解析任务</button>
+              <button class="secondary-button" type="submit" data-action="run">直接入队</button>
+              <button class="secondary-button" type="submit" data-action="plan">生成诊断计划</button>
+              <button id="execute-plan" class="ghost-button" type="button" hidden>执行最近计划</button>
+            </div>
+          </form>
+
+          <div class="quick-scenarios">
+            <button type="button" class="scenario-chip" data-prompt="每天凌晨备份 MySQL 数据库">MySQL 定时备份</button>
+            <button type="button" class="scenario-chip" data-prompt="nginx 无法访问，网站打不开">Nginx 可用性诊断</button>
+            <button type="button" class="scenario-chip" data-prompt="redis 响应变慢，帮我排查性能问题">Redis 性能分析</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="overview-grid">
+        <article class="panel metrics-panel">
+          <div class="panel-heading">
+            <span class="module-index">02</span>
+            <div>
+              <h3>集群概览</h3>
+              <p>上线状态、任务量、成功率和案例沉淀</p>
+            </div>
+          </div>
+          <div id="metrics-grid" class="metrics-grid"></div>
+        </article>
+
+        <article class="panel rail-panel">
+          <div class="panel-heading">
+            <span class="module-index">03</span>
+            <div>
+              <h3>AI 决策轨道</h3>
+              <p>解析 -> 规划 -> 风控 -> 调度 -> 执行 -> 分析 -> 回放</p>
+            </div>
+          </div>
+          <div id="rail-steps" class="rail-steps"></div>
+          <pre id="rail-output" class="rail-output">等待输入任务或登录后加载实时数据。</pre>
+        </article>
+
+        <article class="panel approvals-panel">
+          <div class="panel-heading">
+            <span class="module-index">04</span>
+            <div>
+              <h3>风险与审批</h3>
+              <p>高风险动作必须走人工确认</p>
+            </div>
+          </div>
+          <div class="approval-summary">
+            <div>
+              <span class="meta-label">待审批任务</span>
+              <strong id="pending-approval-count">0</strong>
+            </div>
+            <div>
+              <span class="meta-label">模板总数</span>
+              <strong id="templates-total">0</strong>
+            </div>
+          </div>
+          <div id="approval-list" class="stack-list"></div>
+        </article>
+      </section>
+
+      <section class="scenario-strip">
+        <article class="scenario-card card-large">
+          <p class="section-kicker">Typical Scenario / 01</p>
+          <h3>MySQL Backup</h3>
+          <p>把自然语言输入解析成低风险、可调度的周期任务，适合首屏演示“自动化但不失控”。</p>
+        </article>
+        <article class="scenario-card">
+          <p class="section-kicker">Typical Scenario / 02</p>
+          <h3>Nginx Diagnosis</h3>
+          <p>多步骤诊断计划串起来，能直观看到执行轨迹、审批节点和结果汇总。</p>
+        </article>
+        <article class="scenario-card accent-card">
+          <p class="section-kicker">Typical Scenario / 03</p>
+          <h3>Redis Analysis</h3>
+          <p>案例库和历史建议在这里形成闭环，让平台更像“有记忆的运维系统”。</p>
+        </article>
+      </section>
+
+      <section class="data-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">05</span>
+            <div>
+              <h3>任务时间线</h3>
+              <p>最近任务状态、风控等级和执行摘要</p>
+            </div>
+          </div>
+          <div id="job-list" class="stack-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">06</span>
+            <div>
+              <h3>案例库</h3>
+              <p>相似问题建议与历史诊断痕迹</p>
+            </div>
+          </div>
+          <div id="case-list" class="stack-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">07</span>
+            <div>
+              <h3>审计回放</h3>
+              <p>谁发起、AI 生成了什么、最终由谁执行</p>
+            </div>
+          </div>
+          <div id="audit-list" class="stack-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <aside id="login-panel" class="login-panel">
+    <div class="login-card">
+      <div class="panel-heading">
+        <span class="module-index">AUTH</span>
+        <div>
+          <h3>登录控制台</h3>
+          <p>默认账号 `admin` / `admin123`</p>
+        </div>
+      </div>
+      <form id="login-form">
+        <label class="field-label" for="username">用户名</label>
+        <input id="username" name="username" type="text" value="admin" autocomplete="username">
+        <label class="field-label" for="password">密码</label>
+        <input id="password" name="password" type="password" value="admin123" autocomplete="current-password">
+        <div class="login-actions">
+          <button class="primary-button" type="submit">登录并拉取实时数据</button>
+          <button id="logout-button" class="ghost-button" type="button">退出登录</button>
+        </div>
+      </form>
+      <p id="login-message" class="helper-text">未登录时也可以浏览界面，但实时数据和任务操作需要认证。</p>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
