@@ -69,9 +69,12 @@ func NewServer(cfg Config) *Server {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", server.handleDashboardPage)
+	mux.Handle("GET /static/", server.staticAssetsHandler())
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
+	mux.HandleFunc("GET /api/v1/dashboard/summary", server.withUserAuth(server.handleDashboardSummary))
 	mux.HandleFunc("POST /api/v1/jobs", server.withUserAuth(server.handleCreateJob))
 	mux.HandleFunc("GET /api/v1/jobs", server.withUserAuth(server.handleListJobs))
 	mux.HandleFunc("GET /api/v1/jobs/", server.withUserAuth(server.handleGetJob))
