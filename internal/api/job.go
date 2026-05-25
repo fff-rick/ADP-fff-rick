@@ -3,6 +3,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 
 	"adp/internal/model"
@@ -39,8 +41,42 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, job)
 }
 
-func (s *Server) handleListJobs(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.ListJobs())
+func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	jobs := s.store.ListJobs()
+	sourceType := strings.TrimSpace(r.URL.Query().Get("source_type"))
+	workerType := strings.TrimSpace(r.URL.Query().Get("worker_type"))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+
+	filtered := make([]model.Job, 0, len(jobs))
+	for _, job := range jobs {
+		if sourceType != "" && job.SourceType != sourceType {
+			continue
+		}
+		if workerType != "" && job.WorkerType != workerType {
+			continue
+		}
+		if status != "" && string(job.Status) != status {
+			continue
+		}
+		filtered = append(filtered, job)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	if limitValue := strings.TrimSpace(r.URL.Query().Get("limit")); limitValue != "" {
+		limit, err := strconv.Atoi(limitValue)
+		if err != nil || limit <= 0 {
+			writeError(w, http.StatusBadRequest, errors.New("limit must be a positive integer"))
+			return
+		}
+		if len(filtered) > limit {
+			filtered = filtered[:limit]
+		}
+	}
+
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {

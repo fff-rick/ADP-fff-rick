@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Workers</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="workers">
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">ADP / Worker Management</p>
+        <h1>Workers 页面</h1>
+        <p class="topbar-note">只处理 Worker 的创建与查看。</p>
+      </div>
+
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      </div>
+    </header>
+
+    <nav class="nav-strip">
+      <a class="nav-link" href="/">首页</a>
+      <a class="nav-link" href="/login">登录</a>
+      <a class="nav-link" href="/users">用户</a>
+      <a class="nav-link is-active" href="/workers">Workers</a>
+      <a class="nav-link" href="/jobs">Jobs</a>
+      <a class="nav-link" href="/tasks">Tasks</a>
+    </nav>
+
+    <main class="workspace">
+      <section class="page-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">01</span>
+            <div>
+              <h3>创建 Worker</h3>
+              <p>登录后可直接创建</p>
+            </div>
+          </div>
+
+          <form id="worker-form" class="form-stack">
+            <div class="field-group">
+              <label class="field-label" for="worker-name">Worker 名称</label>
+              <input id="worker-name" name="worker-name" type="text" placeholder="例如：shell-east-01">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="worker-type">Worker 类型</label>
+              <input id="worker-type" name="worker-type" type="text" value="shell" placeholder="例如：shell">
+            </div>
+            <div class="command-actions">
+              <button class="primary-button" type="submit">创建 Worker</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">02</span>
+            <div>
+              <h3>Worker 列表</h3>
+              <p>查看状态与心跳时间</p>
+            </div>
+          </div>
+          <div id="worker-list" class="stack-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Jobs</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="jobs">
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">ADP / Job Management</p>
+        <h1>Jobs 页面</h1>
+        <p class="topbar-note">只处理 Job 的创建、查看与审批。</p>
+      </div>
+
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      </div>
+    </header>
+
+    <nav class="nav-strip">
+      <a class="nav-link" href="/">首页</a>
+      <a class="nav-link" href="/login">登录</a>
+      <a class="nav-link" href="/users">用户</a>
+      <a class="nav-link" href="/workers">Workers</a>
+      <a class="nav-link is-active" href="/jobs">Jobs</a>
+      <a class="nav-link" href="/tasks">Tasks</a>
+    </nav>
+
+    <main class="workspace">
+      <section class="page-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">01</span>
+            <div>
+              <h3>创建 Job</h3>
+              <p>手动提交一个可调度 Job</p>
+            </div>
+          </div>
+
+          <form id="job-form" class="form-stack">
+            <div class="field-group">
+              <label class="field-label" for="job-name">Job 名称</label>
+              <input id="job-name" name="job-name" type="text" placeholder="例如：check-nginx-health">
+            </div>
+            <div class="field-group two-up">
+              <div>
+                <label class="field-label" for="job-worker-type">Worker 类型</label>
+                <input id="job-worker-type" name="job-worker-type" type="text" value="shell">
+              </div>
+              <div>
+                <label class="field-label" for="job-command">命令</label>
+                <input id="job-command" name="job-command" type="text" placeholder="例如：curl -I http://127.0.0.1">
+              </div>
+            </div>
+            <div class="command-actions">
+              <button class="primary-button" type="submit">创建 Job</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">02</span>
+            <div>
+              <h3>待审批任务</h3>
+              <p>可直接批准或拒绝</p>
+            </div>
+          </div>
+          <div id="approval-list" class="stack-list"></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <span class="module-index">03</span>
+          <div>
+            <h3>Job 列表</h3>
+            <p>查看最近创建与执行状态</p>
+          </div>
+        </div>
+        <div id="job-list" class="stack-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

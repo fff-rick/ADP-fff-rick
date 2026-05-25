@@ -1,99 +1,71 @@
 const state = {
   token: window.localStorage.getItem("adp.token") || "",
   user: null,
-  lastPlan: null,
   toastTimer: null,
   refreshTimer: null,
 };
 
+const page = document.body.dataset.page || "home";
+
 const elements = {
-  clock: document.getElementById("clock"),
-  sessionState: document.getElementById("session-state"),
-  loginToggle: document.getElementById("login-toggle"),
-  loginPanel: document.getElementById("login-panel"),
-  loginForm: document.getElementById("login-form"),
-  loginMessage: document.getElementById("login-message"),
-  logoutButton: document.getElementById("logout-button"),
-  commandForm: document.getElementById("command-form"),
-  commandInput: document.getElementById("command-input"),
-  executePlan: document.getElementById("execute-plan"),
-  metricsGrid: document.getElementById("metrics-grid"),
-  railSteps: document.getElementById("rail-steps"),
-  railOutput: document.getElementById("rail-output"),
-  pendingApprovalCount: document.getElementById("pending-approval-count"),
-  templatesTotal: document.getElementById("templates-total"),
-  approvalList: document.getElementById("approval-list"),
-  jobList: document.getElementById("job-list"),
-  caseList: document.getElementById("case-list"),
-  auditList: document.getElementById("audit-list"),
-  toast: document.getElementById("toast"),
+  clock: byId("clock"),
+  sessionState: byId("session-state"),
+  refreshPage: byId("refresh-page"),
+  toast: byId("toast"),
+  loginForm: byId("login-form"),
+  loginMessage: byId("login-message"),
+  logoutButton: byId("logout-button"),
+  metricsGrid: byId("metrics-grid"),
+  approvalList: byId("approval-list"),
+  auditList: byId("audit-list"),
+  userForm: byId("user-form"),
+  usersAccessNote: byId("users-access-note"),
+  userList: byId("user-list"),
+  workerForm: byId("worker-form"),
+  workerList: byId("worker-list"),
+  jobForm: byId("job-form"),
+  jobList: byId("job-list"),
+  taskForm: byId("task-form"),
+  taskInput: byId("task-input"),
+  taskParams: byId("task-params"),
+  taskOutput: byId("task-output"),
+  taskList: byId("task-list"),
+  templateList: byId("template-list"),
 };
 
 boot();
 
 function boot() {
-  bindEvents();
   startClock();
-  setRail(defaultRailSteps(), "等待输入任务或登录后加载实时数据。");
-  renderEmptyDashboard();
+  bindCommonEvents();
   updateSessionState();
+  renderLoggedOutPlaceholders();
 
   if (state.token) {
-    refreshSummary();
-    state.refreshTimer = window.setInterval(refreshSummary, 12000);
+    refreshCurrentPage();
+    state.refreshTimer = window.setInterval(refreshCurrentPage, 15000);
   }
 }
 
-function bindEvents() {
-  elements.loginToggle.addEventListener("click", () => toggleLoginPanel());
-  elements.logoutButton.addEventListener("click", handleLogout);
-  elements.loginPanel.addEventListener("click", (event) => {
-    if (event.target === elements.loginPanel) {
-      toggleLoginPanel(false);
-    }
-  });
-
-  elements.loginForm.addEventListener("submit", handleLogin);
-  elements.commandForm.addEventListener("submit", handleCommandSubmit);
-  elements.executePlan.addEventListener("click", executeLatestPlan);
-
-  document.querySelectorAll(".scenario-chip").forEach((button) => {
-    button.addEventListener("click", () => {
-      elements.commandInput.value = button.dataset.prompt || "";
-      elements.commandInput.focus();
-    });
-  });
-
-  elements.approvalList.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-approval-id]");
-    if (!button) {
-      return;
-    }
-
-    const jobID = button.dataset.approvalId;
-    const approved = button.dataset.decision === "approve";
-    await decideApproval(jobID, approved);
-  });
+function bindCommonEvents() {
+  elements.refreshPage?.addEventListener("click", () => refreshCurrentPage());
+  elements.logoutButton?.addEventListener("click", handleLogout);
+  elements.loginForm?.addEventListener("submit", handleLogin);
+  elements.userForm?.addEventListener("submit", handleCreateUser);
+  elements.workerForm?.addEventListener("submit", handleCreateWorker);
+  elements.jobForm?.addEventListener("submit", handleCreateJob);
+  elements.taskForm?.addEventListener("submit", handleTaskSubmit);
+  elements.approvalList?.addEventListener("click", handleApprovalAction);
 }
 
 function startClock() {
   const tick = () => {
-    elements.clock.textContent = new Date().toLocaleTimeString("zh-CN", {
-      hour12: false,
-    });
+    if (elements.clock) {
+      elements.clock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    }
   };
-
   tick();
   window.setInterval(tick, 1000);
-}
-
-function toggleLoginPanel(force) {
-  const shouldOpen = typeof force === "boolean"
-    ? force
-    : !elements.loginPanel.classList.contains("is-open");
-
-  elements.loginPanel.classList.toggle("is-open", shouldOpen);
-  elements.loginPanel.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
 }
 
 async function handleLogin(event) {
@@ -108,21 +80,29 @@ async function handleLogin(event) {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
-
     state.token = result.token;
     state.user = result.user;
     window.localStorage.setItem("adp.token", state.token);
     updateSessionState();
-    elements.loginMessage.textContent = "登录成功，正在刷新控制台。";
-    toggleLoginPanel(false);
-    showToast("已登录，实时数据已解锁");
-    refreshSummary();
+    if (elements.loginMessage) {
+      elements.loginMessage.textContent = "登录成功。";
+    }
+    showToast("已登录");
 
     if (!state.refreshTimer) {
-      state.refreshTimer = window.setInterval(refreshSummary, 12000);
+      state.refreshTimer = window.setInterval(refreshCurrentPage, 15000);
     }
+
+    if (page === "login") {
+      window.location.href = "/";
+      return;
+    }
+
+    await refreshCurrentPage();
   } catch (error) {
-    elements.loginMessage.textContent = error.message;
+    if (elements.loginMessage) {
+      elements.loginMessage.textContent = error.message;
+    }
     showToast(error.message);
   }
 }
@@ -130,53 +110,110 @@ async function handleLogin(event) {
 function handleLogout() {
   state.token = "";
   state.user = null;
-  state.lastPlan = null;
   window.localStorage.removeItem("adp.token");
-  elements.executePlan.hidden = true;
-  elements.loginMessage.textContent = "已退出登录。";
-
   if (state.refreshTimer) {
     window.clearInterval(state.refreshTimer);
     state.refreshTimer = null;
   }
-
   updateSessionState();
-  renderEmptyDashboard();
-  setRail(defaultRailSteps(), "当前未登录，页面仅展示结构与基础状态。");
-  showToast("登录状态已清除");
+  renderLoggedOutPlaceholders();
+  if (elements.loginMessage) {
+    elements.loginMessage.textContent = "已退出登录。";
+  }
+  showToast("已退出登录");
 }
 
-async function refreshSummary() {
-  if (!state.token) {
+async function handleCreateUser(event) {
+  event.preventDefault();
+  if (!ensureAuthed()) {
     return;
   }
 
   try {
-    const summary = await authedRequest("/api/v1/dashboard/summary");
-    state.user = summary.user;
-    updateSessionState(summary.current_time);
-    renderSummary(summary);
+    const user = await authedRequest("/api/v1/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: valueOf("new-username"),
+        password: valueOf("new-password"),
+        role: valueOf("new-role"),
+      }),
+    });
+    elements.userForm.reset();
+    byId("new-role").value = "operator";
+    showToast(`用户 ${user.username} 已创建`);
+    await refreshUsersPage();
   } catch (error) {
-    if (error.code === 401) {
-      handleLogout();
-    }
+    showToast(error.message);
   }
 }
 
-async function handleCommandSubmit(event) {
+async function handleCreateWorker(event) {
   event.preventDefault();
-
-  const input = elements.commandInput.value.trim();
-  if (!input) {
-    showToast("先输入任务目标或故障描述");
+  if (!ensureAuthed()) {
     return;
   }
+
+  try {
+    const worker = await authedRequest("/api/v1/workers", {
+      method: "POST",
+      body: JSON.stringify({
+        name: valueOf("worker-name"),
+        worker_type: valueOf("worker-type"),
+      }),
+    });
+    elements.workerForm.reset();
+    byId("worker-type").value = "shell";
+    showToast(`Worker ${worker.name} 已创建`);
+    await refreshWorkersPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleCreateJob(event) {
+  event.preventDefault();
+  if (!ensureAuthed()) {
+    return;
+  }
+
+  try {
+    const job = await authedRequest("/api/v1/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: valueOf("job-name"),
+        worker_type: valueOf("job-worker-type"),
+        command: valueOf("job-command"),
+      }),
+    });
+    elements.jobForm.reset();
+    byId("job-worker-type").value = "shell";
+    showToast(`Job ${job.id} 已创建`);
+    await refreshJobsPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleTaskSubmit(event) {
+  event.preventDefault();
   if (!ensureAuthed()) {
     return;
   }
 
   const action = event.submitter?.dataset.action || "parse";
-  const outputPrefix = `> ${input}\n\n`;
+  const input = elements.taskInput?.value.trim();
+  if (!input) {
+    showToast("先输入任务描述");
+    return;
+  }
+
+  let parameters;
+  try {
+    parameters = parseOptionalJSON(elements.taskParams?.value.trim() || "");
+  } catch (error) {
+    showToast(error.message);
+    return;
+  }
 
   try {
     if (action === "parse") {
@@ -184,177 +221,179 @@ async function handleCommandSubmit(event) {
         method: "POST",
         body: JSON.stringify({ input }),
       });
-
-      const steps = defaultRailSteps();
-      steps[0].state = "done";
-      steps[0].detail = "已识别任务目标。";
-      steps[1].state = "done";
-      steps[1].detail = `${result.intent} / ${result.target_type}`;
-      steps[2].state = result.risk_level === "high" ? "warn" : "done";
-      steps[2].detail = `风险等级：${result.risk_level}`;
-      setRail(steps, outputPrefix + JSON.stringify(result, null, 2));
-      showToast("任务解析完成");
+      if (elements.taskOutput) {
+        elements.taskOutput.textContent = JSON.stringify(result, null, 2);
+      }
+      showToast("Task 解析完成");
       return;
     }
 
-    if (action === "run") {
-      const result = await authedRequest("/api/v1/tasks/run", {
-        method: "POST",
-        body: JSON.stringify({ input }),
-      });
-
-      const steps = defaultRailSteps();
-      steps[0].state = "done";
-      steps[0].detail = "输入已接收。";
-      steps[1].state = "done";
-      steps[1].detail = `${result.parsed_intent.intent} / 模板 ${result.template_code}`;
-      steps[2].state = result.approval_required ? "warn" : "done";
-      steps[2].detail = result.approval_required ? "任务进入待审批队列。" : "已通过策略校验。";
-      steps[3].state = "done";
-      steps[3].detail = `任务 ${result.job.id} 已创建。`;
-      steps[4].state = result.approval_required ? "warn" : "active";
-      steps[4].detail = result.approval_required ? "等待审批后执行。" : "等待 Worker 拉取执行。";
-      setRail(steps, outputPrefix + JSON.stringify(result, null, 2));
-      showToast(result.approval_required ? "任务已进入审批队列" : "任务已成功入队");
-      refreshSummary();
-      return;
-    }
-
-    if (action === "plan") {
-      const result = await authedRequest("/api/v1/diagnosis/plan", {
-        method: "POST",
-        body: JSON.stringify({ description: input }),
-      });
-
-      state.lastPlan = result;
-      elements.executePlan.hidden = false;
-
-      const steps = defaultRailSteps();
-      steps[0].state = "done";
-      steps[0].detail = "故障描述已接收。";
-      steps[1].state = "done";
-      steps[1].detail = `已生成 ${result.steps.length} 个诊断步骤。`;
-      steps[2].state = "active";
-      steps[2].detail = "可继续执行，或进入审批流程。";
-      setRail(steps, outputPrefix + JSON.stringify(result, null, 2));
-      showToast("诊断计划已生成");
-    }
-  } catch (error) {
-    setRail(markRailFailed(), outputPrefix + error.message);
-    showToast(error.message);
-  }
-}
-
-async function executeLatestPlan() {
-  if (!state.lastPlan?.id) {
-    showToast("当前没有可执行的诊断计划");
-    return;
-  }
-  if (!ensureAuthed()) {
-    return;
-  }
-
-  try {
-    const result = await authedRequest(`/api/v1/diagnosis/plan/${state.lastPlan.id}/execute`, {
+    const result = await authedRequest("/api/v1/tasks/run", {
       method: "POST",
+      body: JSON.stringify({ input, parameters }),
     });
-
-    const steps = defaultRailSteps();
-    steps[0].state = "done";
-    steps[1].state = "done";
-    steps[1].detail = state.lastPlan.title;
-    steps[2].state = result.approval_required ? "warn" : "done";
-    steps[2].detail = result.approval_required ? "部分步骤需要审批。" : "计划已通过策略校验。";
-    steps[3].state = "done";
-    steps[3].detail = `已创建 ${result.jobs.length} 个任务。`;
-    steps[4].state = "active";
-    steps[4].detail = "等待 Worker 执行并回传结果。";
-    setRail(steps, JSON.stringify(result, null, 2));
-    showToast("诊断计划已下发");
-    refreshSummary();
+    if (elements.taskOutput) {
+      elements.taskOutput.textContent = JSON.stringify(result, null, 2);
+    }
+    showToast(result.approval_required ? "Task 已进入审批队列" : "Task 已创建");
+    await refreshTasksPage();
   } catch (error) {
-    setRail(markRailFailed(), error.message);
+    if (elements.taskOutput) {
+      elements.taskOutput.textContent = error.message;
+    }
     showToast(error.message);
   }
 }
 
-async function decideApproval(jobID, approved) {
+async function handleApprovalAction(event) {
+  const button = event.target.closest("[data-approval-id]");
+  if (!button) {
+    return;
+  }
   if (!ensureAuthed()) {
     return;
   }
 
+  const approved = button.dataset.decision === "approve";
   try {
-    const result = await authedRequest(`/api/v1/approvals/jobs/${jobID}`, {
+    const result = await authedRequest(`/api/v1/approvals/jobs/${button.dataset.approvalId}`, {
       method: "POST",
       body: JSON.stringify({
         approved,
-        comment: approved ? "Approved from dashboard" : "Rejected from dashboard",
+        comment: approved ? "Approved from UI" : "Rejected from UI",
       }),
     });
-
-    const steps = defaultRailSteps();
-    steps[2].state = approved ? "done" : "fail";
-    steps[2].detail = approved ? "高风险动作已批准。" : "任务已拒绝。";
-    steps[3].state = approved ? "active" : "fail";
-    steps[3].detail = approved ? `任务 ${result.id} 已重新入队。` : `任务 ${result.id} 已取消。`;
-    setRail(steps, JSON.stringify(result, null, 2));
-    showToast(approved ? "审批已通过" : "审批已拒绝");
-    refreshSummary();
+    showToast(approved ? `已批准 ${result.id}` : `已拒绝 ${result.id}`);
+    await refreshCurrentPage();
   } catch (error) {
     showToast(error.message);
   }
 }
 
-function renderSummary(summary) {
-  const successRate = `${Math.round(summary.metrics.job_success_rate * 100)}%`;
-  const latency = `${summary.metrics.avg_schedule_latency_seconds.toFixed(2)}s`;
-  const metrics = [
-    {
-      label: "Online Workers",
-      value: summary.metrics.workers_online,
-      note: `${summary.workers.length} 个 Worker 已注册`,
-    },
-    {
-      label: "Tasks Today",
-      value: summary.metrics.jobs_total,
-      note: `模板数 ${summary.templates_total}`,
-    },
-    {
-      label: "Success Rate",
-      value: successRate,
-      note: `${summary.metrics.jobs_success} 成功 / ${summary.metrics.jobs_failed} 失败`,
-    },
-    {
-      label: "Approval Queue",
-      value: summary.metrics.jobs_waiting_approval,
-      note: "等待人工确认",
-    },
-    {
-      label: "Case Memory",
-      value: summary.metrics.incident_cases_total,
-      note: "已沉淀历史经验",
-    },
-    {
-      label: "Avg Latency",
-      value: latency,
-      note: "从入队到开始执行",
-    },
-  ];
+async function refreshCurrentPage() {
+  if (!state.token) {
+    renderLoggedOutPlaceholders();
+    return;
+  }
 
-  elements.metricsGrid.innerHTML = metrics.map((item) => `
-    <article class="metric-card">
-      <p class="section-kicker">${escapeHTML(item.label)}</p>
-      <strong>${escapeHTML(String(item.value))}</strong>
-      <p>${escapeHTML(item.note)}</p>
-    </article>
-  `).join("");
+  try {
+    switch (page) {
+      case "home":
+        await refreshHomePage();
+        break;
+      case "users":
+        await refreshUsersPage();
+        break;
+      case "workers":
+        await refreshWorkersPage();
+        break;
+      case "jobs":
+        await refreshJobsPage();
+        break;
+      case "tasks":
+        await refreshTasksPage();
+        break;
+      default:
+        await refreshSessionOnly();
+        break;
+    }
+  } catch (error) {
+    if (error.code === 401) {
+      handleLogout();
+      return;
+    }
+    showToast(error.message);
+  }
+}
 
-  elements.pendingApprovalCount.textContent = String(summary.pending_approvals.length);
-  elements.templatesTotal.textContent = String(summary.templates_total);
+async function refreshSessionOnly() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+}
 
+async function refreshHomePage() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+  renderSummaryMetrics(summary);
+  renderApprovals(summary.pending_approvals);
+  renderAuditLogs(summary.recent_audit_logs);
+}
+
+async function refreshUsersPage() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+
+  if (state.user.role !== "admin") {
+    if (elements.usersAccessNote) {
+      elements.usersAccessNote.textContent = "当前账户不是管理员，无法查看或创建用户。";
+    }
+    renderList(elements.userList, [], () => "", "请使用管理员账户登录。");
+    return;
+  }
+
+  if (elements.usersAccessNote) {
+    elements.usersAccessNote.textContent = "当前为管理员，可创建与查看用户。";
+  }
+
+  const users = await authedRequest("/api/v1/users");
   renderList(
-    elements.approvalList,
-    summary.pending_approvals,
+    elements.userList,
+    users,
+    (user) => `
+      <article class="list-card">
+        <div class="list-row">
+          <div>
+            <h4>${escapeHTML(user.username)}</h4>
+            <p>角色：${escapeHTML(user.role)}</p>
+          </div>
+          <span class="status-pill">${escapeHTML(user.role)}</span>
+        </div>
+      </article>
+    `,
+    "暂无用户。"
+  );
+}
+
+async function refreshWorkersPage() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+
+  const workers = await authedRequest("/api/v1/workers");
+  renderList(
+    elements.workerList,
+    workers,
+    (worker) => `
+      <article class="list-card">
+        <div class="list-row">
+          <div>
+            <h4>${escapeHTML(worker.name)}</h4>
+            <p>${escapeHTML(worker.id)} / ${escapeHTML(worker.worker_type)}</p>
+          </div>
+          <span class="status-pill ${statusClass(worker.status)}">${escapeHTML(worker.status)}</span>
+        </div>
+        <div class="list-meta">
+          <span>最近心跳 ${formatTime(worker.last_heartbeat_at)}</span>
+          <span>创建于 ${formatTime(worker.created_at)}</span>
+        </div>
+      </article>
+    `,
+    "暂无 Worker。"
+  );
+}
+
+async function refreshJobsPage() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+
+  const jobs = await authedRequest("/api/v1/jobs?limit=16");
+  renderList(
+    elements.jobList,
+    jobs,
     (job) => `
       <article class="list-card">
         <div class="list-row">
@@ -365,7 +404,107 @@ function renderSummary(summary) {
           <span class="status-pill ${statusClass(job.status)}">${escapeHTML(job.status)}</span>
         </div>
         <div class="list-meta">
-          <span>${escapeHTML(job.risk_level || "unknown")}</span>
+          <span>${escapeHTML(job.id)}</span>
+          <span>${escapeHTML(job.worker_type)}</span>
+          <span>${escapeHTML(job.source_type || "manual_job")}</span>
+          <span>${formatTime(job.updated_at)}</span>
+        </div>
+      </article>
+    `,
+    "暂无 Job。"
+  );
+  renderApprovals(summary.pending_approvals);
+}
+
+async function refreshTasksPage() {
+  const summary = await authedRequest("/api/v1/dashboard/summary");
+  state.user = summary.user;
+  updateSessionState(summary.current_time);
+
+  const [tasks, templates] = await Promise.all([
+    authedRequest("/api/v1/tasks"),
+    authedRequest("/api/v1/templates"),
+  ]);
+
+  renderList(
+    elements.taskList,
+    tasks,
+    (task) => `
+      <article class="list-card">
+        <div class="list-row">
+          <div>
+            <h4>${escapeHTML(task.name)}</h4>
+            <p>${escapeHTML(task.command || "无命令详情")}</p>
+          </div>
+          <span class="status-pill ${statusClass(task.status)}">${escapeHTML(task.status)}</span>
+        </div>
+        <div class="list-meta">
+          <span>${escapeHTML(task.template_code || "--")}</span>
+          <span>风险 ${escapeHTML(task.risk_level || "--")}</span>
+          <span>${formatTime(task.created_at)}</span>
+        </div>
+      </article>
+    `,
+    "暂无 Task 记录。"
+  );
+
+  renderList(
+    elements.templateList,
+    templates,
+    (template) => `
+      <article class="list-card">
+        <div class="list-row">
+          <div>
+            <h4>${escapeHTML(template.name)}</h4>
+            <p>${escapeHTML(template.description || template.code)}</p>
+          </div>
+          <span class="status-pill">${escapeHTML(template.tool_type)}</span>
+        </div>
+        <div class="list-meta">
+          <span>${escapeHTML(template.code)}</span>
+          <span>风险 ${escapeHTML(template.risk_level)}</span>
+        </div>
+      </article>
+    `,
+    "暂无模板。"
+  );
+}
+
+function renderSummaryMetrics(summary) {
+  if (!elements.metricsGrid) {
+    return;
+  }
+  const metrics = [
+    ["在线 Workers", summary.metrics.workers_online, `${summary.workers.length} 个 Worker 已注册`],
+    ["Jobs 总数", summary.metrics.jobs_total, `${summary.metrics.jobs_success} 成功 / ${summary.metrics.jobs_failed} 失败`],
+    ["待审批", summary.metrics.jobs_waiting_approval, "高风险任务等待人工确认"],
+    ["模板总数", summary.templates_total, "可用于 Task 解析"],
+  ];
+
+  elements.metricsGrid.innerHTML = metrics.map(([label, value, note]) => `
+    <article class="metric-card">
+      <p class="section-kicker">${escapeHTML(String(label))}</p>
+      <strong>${escapeHTML(String(value))}</strong>
+      <p>${escapeHTML(String(note))}</p>
+    </article>
+  `).join("");
+}
+
+function renderApprovals(items) {
+  renderList(
+    elements.approvalList,
+    items,
+    (job) => `
+      <article class="list-card">
+        <div class="list-row">
+          <div>
+            <h4>${escapeHTML(job.name)}</h4>
+            <p>${escapeHTML(job.command || "无命令详情")}</p>
+          </div>
+          <span class="status-pill ${statusClass(job.status)}">${escapeHTML(job.status)}</span>
+        </div>
+        <div class="list-meta">
+          <span>风险 ${escapeHTML(job.risk_level || "--")}</span>
           <span>${escapeHTML(job.worker_type)}</span>
           <span>${formatTime(job.created_at)}</span>
         </div>
@@ -377,54 +516,12 @@ function renderSummary(summary) {
     `,
     "当前没有待审批任务。"
   );
+}
 
-  renderList(
-    elements.jobList,
-    summary.recent_jobs,
-    (job) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(job.name)}</h4>
-            <p>${escapeHTML(job.command || "无命令详情")}</p>
-          </div>
-          <span class="status-pill ${statusClass(job.status)}">${escapeHTML(job.status)}</span>
-        </div>
-        <div class="list-meta">
-          <span>${escapeHTML(job.worker_type)}</span>
-          <span>${escapeHTML(job.template_code || job.source_type || "manual")}</span>
-          <span>${formatTime(job.updated_at)}</span>
-        </div>
-      </article>
-    `,
-    "暂无任务记录。"
-  );
-
-  renderList(
-    elements.caseList,
-    summary.recent_cases,
-    (incidentCase) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(incidentCase.title)}</h4>
-            <p>${escapeHTML(incidentCase.summary || "暂无摘要")}</p>
-          </div>
-          <span class="status-pill">${escapeHTML(incidentCase.trigger_type || "case")}</span>
-        </div>
-        <div class="list-meta">
-          <span>${escapeHTML(incidentCase.fault_type || "unknown")}</span>
-          <span>置信度 ${Math.round((incidentCase.confidence || 0) * 100)}%</span>
-          <span>${formatTime(incidentCase.updated_at)}</span>
-        </div>
-      </article>
-    `,
-    "案例库还没有历史数据。"
-  );
-
+function renderAuditLogs(items) {
   renderList(
     elements.auditList,
-    summary.recent_audit_logs,
+    items,
     (log) => `
       <article class="list-card">
         <div class="list-row">
@@ -439,122 +536,62 @@ function renderSummary(summary) {
         </div>
       </article>
     `,
-    "审计记录为空。"
+    "暂无审计记录。"
   );
 }
 
-function renderEmptyDashboard() {
-  elements.metricsGrid.innerHTML = "";
-  elements.pendingApprovalCount.textContent = "0";
-  elements.templatesTotal.textContent = "0";
+function renderLoggedOutPlaceholders() {
+  if (elements.loginMessage && page === "login") {
+    elements.loginMessage.textContent = "登录后即可进入用户、Workers、Jobs、Tasks 页面进行操作。";
+  }
+  renderList(elements.userList, [], () => "", "登录后显示用户列表。");
+  renderList(elements.workerList, [], () => "", "登录后显示 Worker 列表。");
+  renderList(elements.jobList, [], () => "", "登录后显示 Job 列表。");
+  renderList(elements.taskList, [], () => "", "登录后显示 Task 记录。");
+  renderList(elements.templateList, [], () => "", "登录后显示模板。");
   renderList(elements.approvalList, [], () => "", "登录后显示待审批任务。");
-  renderList(elements.jobList, [], () => "", "登录后显示最近任务。");
-  renderList(elements.caseList, [], () => "", "登录后显示案例库内容。");
   renderList(elements.auditList, [], () => "", "登录后显示审计记录。");
+  if (elements.metricsGrid) {
+    elements.metricsGrid.innerHTML = "";
+  }
+  if (elements.taskOutput) {
+    elements.taskOutput.textContent = "等待输入任务。";
+  }
 }
 
 function renderList(container, items, renderer, emptyText) {
+  if (!container) {
+    return;
+  }
   if (!items || items.length === 0) {
     container.innerHTML = `<div class="empty-state">${escapeHTML(emptyText)}</div>`;
     return;
   }
-
   container.innerHTML = items.map(renderer).join("");
 }
 
 function updateSessionState(serverTime) {
+  if (!elements.sessionState) {
+    return;
+  }
   if (state.user?.username) {
-    elements.sessionState.textContent = `${state.user.username} / 在线`;
-    if (serverTime) {
+    elements.sessionState.textContent = `${state.user.username} / ${state.user.role}`;
+    if (elements.loginMessage && serverTime) {
       elements.loginMessage.textContent = `最近同步：${formatTime(serverTime)}`;
     }
     return;
   }
-
   elements.sessionState.textContent = "未登录";
-}
-
-function setRail(steps, output) {
-  elements.railSteps.innerHTML = steps.map((step) => `
-    <article class="rail-step ${railClass(step.state)}">
-      <div class="rail-marker"></div>
-      <div>
-        <h4>${escapeHTML(step.title)}</h4>
-        <p>${escapeHTML(step.detail)}</p>
-      </div>
-    </article>
-  `).join("");
-
-  elements.railOutput.textContent = output;
-}
-
-function defaultRailSteps() {
-  return [
-    {
-      title: "解析自然语言目标",
-      detail: "识别意图与任务场景。",
-      state: "idle",
-    },
-    {
-      title: "生成结构化任务或计划",
-      detail: "映射模板、参数与诊断步骤。",
-      state: "idle",
-    },
-    {
-      title: "策略校验与风险分级",
-      detail: "检查白名单、模板合法性和审批要求。",
-      state: "idle",
-    },
-    {
-      title: "调度入队",
-      detail: "将任务发送到对应类型的 Worker。",
-      state: "idle",
-    },
-    {
-      title: "Worker 执行",
-      detail: "执行命令并回传结果。",
-      state: "idle",
-    },
-    {
-      title: "结果分析与沉淀",
-      detail: "生成摘要、建议并写入案例库。",
-      state: "idle",
-    },
-    {
-      title: "审计回放",
-      detail: "记录发起、审批与执行过程。",
-      state: "idle",
-    },
-  ];
-}
-
-function markRailFailed() {
-  const steps = defaultRailSteps();
-  steps[2].state = "fail";
-  steps[2].detail = "流程被错误或策略阻断。";
-  return steps;
-}
-
-function railClass(stateName) {
-  return {
-    active: "is-active",
-    done: "is-done",
-    warn: "is-warn",
-    fail: "is-fail",
-  }[stateName] || "";
-}
-
-function statusClass(status) {
-  return `is-${String(status || "").toLowerCase()}`;
 }
 
 function ensureAuthed() {
   if (state.token) {
     return true;
   }
-
-  toggleLoginPanel(true);
-  showToast("这个操作需要先登录");
+  showToast("请先登录");
+  if (page !== "login") {
+    window.location.href = "/login";
+  }
   return false;
 }
 
@@ -584,9 +621,7 @@ async function request(url, options = {}) {
     : await response.text();
 
   if (!response.ok) {
-    const message = typeof payload === "string"
-      ? payload
-      : payload.error || "请求失败";
+    const message = typeof payload === "string" ? payload : payload.error || "请求失败";
     const error = new Error(message);
     error.code = response.status;
     throw error;
@@ -595,16 +630,33 @@ async function request(url, options = {}) {
   return payload;
 }
 
+function valueOf(id) {
+  return String(byId(id)?.value || "").trim();
+}
+
+function parseOptionalJSON(raw) {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    throw new Error("参数 JSON 必须是对象");
+  } catch (_error) {
+    throw new Error("参数 JSON 格式不正确");
+  }
+}
+
 function formatTime(value) {
   if (!value) {
     return "--";
   }
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return String(value);
   }
-
   return date.toLocaleString("zh-CN", {
     hour12: false,
     month: "2-digit",
@@ -614,13 +666,20 @@ function formatTime(value) {
   });
 }
 
+function statusClass(status) {
+  return `is-${String(status || "").toLowerCase()}`;
+}
+
 function showToast(message) {
+  if (!elements.toast) {
+    return;
+  }
   window.clearTimeout(state.toastTimer);
   elements.toast.hidden = false;
   elements.toast.textContent = message;
   state.toastTimer = window.setTimeout(() => {
     elements.toast.hidden = true;
-  }, 2200);
+  }, 2400);
 }
 
 function escapeHTML(value) {
@@ -630,4 +689,8 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function byId(id) {
+  return document.getElementById(id);
 }

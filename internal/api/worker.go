@@ -15,6 +15,27 @@ type registerWorkerRequest struct {
 	WorkerType string `json:"worker_type"`
 }
 
+func (s *Server) handleCreateWorker(w http.ResponseWriter, r *http.Request) {
+	var req registerWorkerRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if req.Name == "" || req.WorkerType == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name and worker_type are required"))
+		return
+	}
+
+	worker := s.store.RegisterWorker(req.Name, req.WorkerType)
+	user := currentUser(r)
+	s.recordAudit("user", user.Username, "worker.created", "worker", worker.ID, map[string]any{
+		"name":        worker.Name,
+		"worker_type": worker.WorkerType,
+	})
+	writeJSON(w, http.StatusCreated, worker)
+}
+
 func (s *Server) handleRegisterWorker(w http.ResponseWriter, r *http.Request) {
 	var req registerWorkerRequest
 	if err := decodeJSON(r, &req); err != nil {
