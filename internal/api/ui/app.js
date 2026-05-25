@@ -69,6 +69,7 @@ function bindEvents() {
     if (!button) {
       return;
     }
+
     const jobID = button.dataset.approvalId;
     const approved = button.dataset.decision === "approve";
     await decideApproval(jobID, approved);
@@ -81,6 +82,7 @@ function startClock() {
       hour12: false,
     });
   };
+
   tick();
   window.setInterval(tick, 1000);
 }
@@ -89,7 +91,9 @@ function toggleLoginPanel(force) {
   const shouldOpen = typeof force === "boolean"
     ? force
     : !elements.loginPanel.classList.contains("is-open");
+
   elements.loginPanel.classList.toggle("is-open", shouldOpen);
+  elements.loginPanel.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
 }
 
 async function handleLogin(event) {
@@ -104,6 +108,7 @@ async function handleLogin(event) {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
+
     state.token = result.token;
     state.user = result.user;
     window.localStorage.setItem("adp.token", state.token);
@@ -112,6 +117,7 @@ async function handleLogin(event) {
     toggleLoginPanel(false);
     showToast("已登录，实时数据已解锁");
     refreshSummary();
+
     if (!state.refreshTimer) {
       state.refreshTimer = window.setInterval(refreshSummary, 12000);
     }
@@ -128,9 +134,15 @@ function handleLogout() {
   window.localStorage.removeItem("adp.token");
   elements.executePlan.hidden = true;
   elements.loginMessage.textContent = "已退出登录。";
+
+  if (state.refreshTimer) {
+    window.clearInterval(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+
   updateSessionState();
   renderEmptyDashboard();
-  setRail(defaultRailSteps(), "当前为未登录状态，页面保留设计稿与基础结构。");
+  setRail(defaultRailSteps(), "当前未登录，页面仅展示结构与基础状态。");
   showToast("登录状态已清除");
 }
 
@@ -172,9 +184,10 @@ async function handleCommandSubmit(event) {
         method: "POST",
         body: JSON.stringify({ input }),
       });
+
       const steps = defaultRailSteps();
       steps[0].state = "done";
-      steps[0].detail = "已识别自然语言目标";
+      steps[0].detail = "已识别任务目标。";
       steps[1].state = "done";
       steps[1].detail = `${result.intent} / ${result.target_type}`;
       steps[2].state = result.risk_level === "high" ? "warn" : "done";
@@ -189,17 +202,18 @@ async function handleCommandSubmit(event) {
         method: "POST",
         body: JSON.stringify({ input }),
       });
+
       const steps = defaultRailSteps();
       steps[0].state = "done";
-      steps[0].detail = "输入已解析";
+      steps[0].detail = "输入已接收。";
       steps[1].state = "done";
       steps[1].detail = `${result.parsed_intent.intent} / 模板 ${result.template_code}`;
       steps[2].state = result.approval_required ? "warn" : "done";
-      steps[2].detail = result.approval_required ? "任务进入待审批" : "通过策略校验";
+      steps[2].detail = result.approval_required ? "任务进入待审批队列。" : "已通过策略校验。";
       steps[3].state = "done";
-      steps[3].detail = `任务 ${result.job.id} 已创建`;
+      steps[3].detail = `任务 ${result.job.id} 已创建。`;
       steps[4].state = result.approval_required ? "warn" : "active";
-      steps[4].detail = result.approval_required ? "等待人工审批后执行" : "等待 Worker 拉取执行";
+      steps[4].detail = result.approval_required ? "等待审批后执行。" : "等待 Worker 拉取执行。";
       setRail(steps, outputPrefix + JSON.stringify(result, null, 2));
       showToast(result.approval_required ? "任务已进入审批队列" : "任务已成功入队");
       refreshSummary();
@@ -211,17 +225,19 @@ async function handleCommandSubmit(event) {
         method: "POST",
         body: JSON.stringify({ description: input }),
       });
+
       state.lastPlan = result;
       elements.executePlan.hidden = false;
+
       const steps = defaultRailSteps();
       steps[0].state = "done";
-      steps[0].detail = "故障描述已接收";
+      steps[0].detail = "故障描述已接收。";
       steps[1].state = "done";
-      steps[1].detail = `生成 ${result.steps.length} 个诊断步骤`;
+      steps[1].detail = `已生成 ${result.steps.length} 个诊断步骤。`;
       steps[2].state = "active";
-      steps[2].detail = "等待你执行计划或进入审批链";
+      steps[2].detail = "可继续执行，或进入审批流程。";
       setRail(steps, outputPrefix + JSON.stringify(result, null, 2));
-      showToast("诊断计划已生成，可以继续执行");
+      showToast("诊断计划已生成");
     }
   } catch (error) {
     setRail(markRailFailed(), outputPrefix + error.message);
@@ -242,16 +258,17 @@ async function executeLatestPlan() {
     const result = await authedRequest(`/api/v1/diagnosis/plan/${state.lastPlan.id}/execute`, {
       method: "POST",
     });
+
     const steps = defaultRailSteps();
     steps[0].state = "done";
     steps[1].state = "done";
-    steps[1].detail = `${state.lastPlan.title}`;
+    steps[1].detail = state.lastPlan.title;
     steps[2].state = result.approval_required ? "warn" : "done";
-    steps[2].detail = result.approval_required ? "部分步骤需审批" : "计划已全部通过策略校验";
+    steps[2].detail = result.approval_required ? "部分步骤需要审批。" : "计划已通过策略校验。";
     steps[3].state = "done";
-    steps[3].detail = `已创建 ${result.jobs.length} 个任务`;
+    steps[3].detail = `已创建 ${result.jobs.length} 个任务。`;
     steps[4].state = "active";
-    steps[4].detail = "等待 Worker 执行并回传结果";
+    steps[4].detail = "等待 Worker 执行并回传结果。";
     setRail(steps, JSON.stringify(result, null, 2));
     showToast("诊断计划已下发");
     refreshSummary();
@@ -274,11 +291,12 @@ async function decideApproval(jobID, approved) {
         comment: approved ? "Approved from dashboard" : "Rejected from dashboard",
       }),
     });
+
     const steps = defaultRailSteps();
     steps[2].state = approved ? "done" : "fail";
-    steps[2].detail = approved ? "高风险动作已批准" : "任务已拒绝";
+    steps[2].detail = approved ? "高风险动作已批准。" : "任务已拒绝。";
     steps[3].state = approved ? "active" : "fail";
-    steps[3].detail = approved ? `任务 ${result.id} 已重新入队` : `任务 ${result.id} 已取消`;
+    steps[3].detail = approved ? `任务 ${result.id} 已重新入队。` : `任务 ${result.id} 已取消。`;
     setRail(steps, JSON.stringify(result, null, 2));
     showToast(approved ? "审批已通过" : "审批已拒绝");
     refreshSummary();
@@ -309,17 +327,17 @@ function renderSummary(summary) {
     {
       label: "Approval Queue",
       value: summary.metrics.jobs_waiting_approval,
-      note: "高风险动作进入人工确认",
+      note: "等待人工确认",
     },
     {
       label: "Case Memory",
       value: summary.metrics.incident_cases_total,
-      note: "沉淀历史故障诊断经验",
+      note: "已沉淀历史经验",
     },
     {
       label: "Avg Latency",
       value: latency,
-      note: "从入队到开始执行的平均耗时",
+      note: "从入队到开始执行",
     },
   ];
 
@@ -379,7 +397,7 @@ function renderSummary(summary) {
         </div>
       </article>
     `,
-    "还没有任务记录。"
+    "暂无任务记录。"
   );
 
   renderList(
@@ -421,7 +439,7 @@ function renderSummary(summary) {
         </div>
       </article>
     `,
-    "审计日志暂时为空。"
+    "审计记录为空。"
   );
 }
 
@@ -430,9 +448,9 @@ function renderEmptyDashboard() {
   elements.pendingApprovalCount.textContent = "0";
   elements.templatesTotal.textContent = "0";
   renderList(elements.approvalList, [], () => "", "登录后显示待审批任务。");
-  renderList(elements.jobList, [], () => "", "登录后显示最新任务时间线。");
+  renderList(elements.jobList, [], () => "", "登录后显示最近任务。");
   renderList(elements.caseList, [], () => "", "登录后显示案例库内容。");
-  renderList(elements.auditList, [], () => "", "登录后显示审计回放。");
+  renderList(elements.auditList, [], () => "", "登录后显示审计记录。");
 }
 
 function renderList(container, items, renderer, emptyText) {
@@ -440,6 +458,7 @@ function renderList(container, items, renderer, emptyText) {
     container.innerHTML = `<div class="empty-state">${escapeHTML(emptyText)}</div>`;
     return;
   }
+
   container.innerHTML = items.map(renderer).join("");
 }
 
@@ -447,10 +466,11 @@ function updateSessionState(serverTime) {
   if (state.user?.username) {
     elements.sessionState.textContent = `${state.user.username} / 在线`;
     if (serverTime) {
-      elements.loginMessage.textContent = `最近同步时间：${formatTime(serverTime)}`;
+      elements.loginMessage.textContent = `最近同步：${formatTime(serverTime)}`;
     }
     return;
   }
+
   elements.sessionState.textContent = "未登录";
 }
 
@@ -464,25 +484,54 @@ function setRail(steps, output) {
       </div>
     </article>
   `).join("");
+
   elements.railOutput.textContent = output;
 }
 
 function defaultRailSteps() {
   return [
-    { title: "解析自然语言目标", detail: "等待识别意图与运维场景。", state: "idle" },
-    { title: "生成结构化任务或计划", detail: "把输入映射到模板、参数和诊断步骤。", state: "idle" },
-    { title: "策略校验与风险分级", detail: "检查白名单、模板合法性和审批要求。", state: "idle" },
-    { title: "调度入队", detail: "把任务发往对应类型的 Worker。", state: "idle" },
-    { title: "Worker 执行", detail: "执行模板命令并回传输出。", state: "idle" },
-    { title: "分析与案例沉淀", detail: "生成摘要、建议并进入案例库。", state: "idle" },
-    { title: "审计回放", detail: "记录谁发起、谁审批、谁执行。", state: "idle" },
+    {
+      title: "解析自然语言目标",
+      detail: "识别意图与任务场景。",
+      state: "idle",
+    },
+    {
+      title: "生成结构化任务或计划",
+      detail: "映射模板、参数与诊断步骤。",
+      state: "idle",
+    },
+    {
+      title: "策略校验与风险分级",
+      detail: "检查白名单、模板合法性和审批要求。",
+      state: "idle",
+    },
+    {
+      title: "调度入队",
+      detail: "将任务发送到对应类型的 Worker。",
+      state: "idle",
+    },
+    {
+      title: "Worker 执行",
+      detail: "执行命令并回传结果。",
+      state: "idle",
+    },
+    {
+      title: "结果分析与沉淀",
+      detail: "生成摘要、建议并写入案例库。",
+      state: "idle",
+    },
+    {
+      title: "审计回放",
+      detail: "记录发起、审批与执行过程。",
+      state: "idle",
+    },
   ];
 }
 
 function markRailFailed() {
   const steps = defaultRailSteps();
   steps[2].state = "fail";
-  steps[2].detail = "本次流程被错误或策略阻断。";
+  steps[2].detail = "流程被错误或策略阻断。";
   return steps;
 }
 
@@ -503,6 +552,7 @@ function ensureAuthed() {
   if (state.token) {
     return true;
   }
+
   toggleLoginPanel(true);
   showToast("这个操作需要先登录");
   return false;
@@ -549,10 +599,12 @@ function formatTime(value) {
   if (!value) {
     return "--";
   }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return String(value);
   }
+
   return date.toLocaleString("zh-CN", {
     hour12: false,
     month: "2-digit",
