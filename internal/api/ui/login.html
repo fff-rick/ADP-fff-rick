@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Login</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="login">
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">ADP / Authentication</p>
+        <h1>登录页面</h1>
+        <p class="topbar-note">单独处理会话认证，不再和资源管理混在同一页。</p>
+      </div>
+
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav-strip">
+      <a class="nav-link" href="/">首页</a>
+      <a class="nav-link is-active" href="/login">登录</a>
+      <a class="nav-link" href="/users">用户</a>
+      <a class="nav-link" href="/workers">Workers</a>
+      <a class="nav-link" href="/jobs">Jobs</a>
+      <a class="nav-link" href="/tasks">Tasks</a>
+    </nav>
+
+    <main class="workspace narrow-workspace">
+      <section class="panel auth-panel">
+        <div class="panel-heading">
+          <span class="module-index">AUTH</span>
+          <div>
+            <h3>登录控制台</h3>
+            <p>默认管理员：admin / admin123</p>
+          </div>
+        </div>
+
+        <form id="login-form" class="form-stack">
+          <div class="field-group">
+            <label class="field-label" for="username">用户名</label>
+            <input id="username" name="username" type="text" value="admin" autocomplete="username">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="password">密码</label>
+            <input id="password" name="password" type="password" value="admin123" autocomplete="current-password">
+          </div>
+          <div class="command-actions">
+            <button class="primary-button" type="submit">登录</button>
+            <button id="logout-button" class="ghost-button" type="button">退出登录</button>
+          </div>
+        </form>
+
+        <p id="login-message" class="helper-text">登录后即可进入用户、Workers、Jobs、Tasks 页面进行操作。</p>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

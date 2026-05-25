@@ -19,21 +19,22 @@ func TestDashboardUIRoutesAndSummary(t *testing.T) {
 	app := httptest.NewServer(server.httpServer.Handler)
 	defer app.Close()
 
-	resp, err := app.Client().Get(app.URL + "/")
-	if err != nil {
-		t.Fatalf("GET / error = %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / status = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-	if !strings.Contains(string(body), "ADP / AI Dispatch Platform") {
-		t.Fatalf("dashboard html missing title: %s", string(body))
+	for _, route := range []string{"/", "/login", "/users", "/workers", "/jobs", "/tasks"} {
+		resp, err := app.Client().Get(app.URL + route)
+		if err != nil {
+			t.Fatalf("GET %s error = %v", route, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("ReadAll(%s) error = %v", route, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want %d", route, resp.StatusCode, http.StatusOK)
+		}
+		if !strings.Contains(string(body), "ADP") {
+			t.Fatalf("ui page missing expected content for %s: %s", route, string(body))
+		}
 	}
 
 	staticResp, err := app.Client().Get(app.URL + "/static/app.css")

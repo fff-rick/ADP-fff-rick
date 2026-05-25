@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Users</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="users">
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">ADP / User Management</p>
+        <h1>用户页面</h1>
+        <p class="topbar-note">只处理用户的创建与查看。</p>
+      </div>
+
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      </div>
+    </header>
+
+    <nav class="nav-strip">
+      <a class="nav-link" href="/">首页</a>
+      <a class="nav-link" href="/login">登录</a>
+      <a class="nav-link is-active" href="/users">用户</a>
+      <a class="nav-link" href="/workers">Workers</a>
+      <a class="nav-link" href="/jobs">Jobs</a>
+      <a class="nav-link" href="/tasks">Tasks</a>
+    </nav>
+
+    <main class="workspace">
+      <section class="page-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">01</span>
+            <div>
+              <h3>创建用户</h3>
+              <p>仅管理员可操作</p>
+            </div>
+          </div>
+
+          <p id="users-access-note" class="helper-text">请先以管理员身份登录。</p>
+
+          <form id="user-form" class="form-stack">
+            <div class="field-group">
+              <label class="field-label" for="new-username">用户名</label>
+              <input id="new-username" name="new-username" type="text" placeholder="例如：ops-user">
+            </div>
+            <div class="field-group two-up">
+              <div>
+                <label class="field-label" for="new-password">密码</label>
+                <input id="new-password" name="new-password" type="password" placeholder="设置初始密码">
+              </div>
+              <div>
+                <label class="field-label" for="new-role">角色</label>
+                <select id="new-role" name="new-role">
+                  <option value="operator">operator</option>
+                  <option value="admin">admin</option>
+                </select>
+              </div>
+            </div>
+            <div class="command-actions">
+              <button class="primary-button" type="submit">创建用户</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <span class="module-index">02</span>
+            <div>
+              <h3>用户列表</h3>
+              <p>当前系统内可登录用户</p>
+            </div>
+          </div>
+          <div id="user-list" class="stack-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

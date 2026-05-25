@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"adp/internal/model"
 	"adp/internal/scheduler"
@@ -12,6 +13,22 @@ import (
 // handleListTemplates returns all available command templates.
 func (s *Server) handleListTemplates(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.templateEng.ListTemplates())
+}
+
+func (s *Server) handleListTaskJobs(w http.ResponseWriter, _ *http.Request) {
+	jobs := s.store.ListJobs()
+	filtered := make([]model.Job, 0, len(jobs))
+	for _, job := range jobs {
+		if job.SourceType == "task" {
+			filtered = append(filtered, job)
+		}
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 type parseTaskRequest struct {

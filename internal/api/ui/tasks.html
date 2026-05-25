@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADP Tasks</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="tasks">
+  <div class="shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">ADP / Task Console</p>
+        <h1>Tasks 页面</h1>
+        <p class="topbar-note">只处理自然语言任务解析、运行、模板查看和最近 Task 记录。</p>
+      </div>
+
+      <div class="topbar-meta">
+        <div class="meta-block">
+          <span class="meta-label">Server Time</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Session</span>
+          <strong id="session-state">未登录</strong>
+        </div>
+        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      </div>
+    </header>
+
+    <nav class="nav-strip">
+      <a class="nav-link" href="/">首页</a>
+      <a class="nav-link" href="/login">登录</a>
+      <a class="nav-link" href="/users">用户</a>
+      <a class="nav-link" href="/workers">Workers</a>
+      <a class="nav-link" href="/jobs">Jobs</a>
+      <a class="nav-link is-active" href="/tasks">Tasks</a>
+    </nav>
+
+    <main class="workspace">
+      <section class="panel">
+        <div class="panel-heading">
+          <span class="module-index">01</span>
+          <div>
+            <h3>Task 控制台</h3>
+            <p>解析自然语言任务并运行</p>
+          </div>
+        </div>
+
+        <form id="task-form" class="form-stack">
+          <div class="field-group">
+            <label class="field-label" for="task-input">任务描述</label>
+            <textarea id="task-input" rows="4" placeholder="例如：每天备份 mysql 数据库"></textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="task-params">参数 JSON（可选）</label>
+            <textarea id="task-params" rows="4" placeholder='例如：{"Database":"demo","Password":"secret"}'></textarea>
+          </div>
+          <div class="command-actions">
+            <button class="primary-button" type="submit" data-action="parse">解析 Task</button>
+            <button class="secondary-button" type="submit" data-action="run">运行 Task</button>
+          </div>
+        </form>
+
+        <div class="task-grid">
+          <div class="subpanel">
+            <div class="subpanel-head">
+              <h4>解析 / 执行结果</h4>
+            </div>
+            <pre id="task-output" class="code-block">等待输入任务。</pre>
+          </div>
+
+          <div class="subpanel">
+            <div class="subpanel-head">
+              <h4>可用模板</h4>
+            </div>
+            <div id="template-list" class="stack-list compact-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <span class="module-index">02</span>
+          <div>
+            <h3>最近 Task</h3>
+            <p>查看最近由 task 流程创建的任务</p>
+          </div>
+        </div>
+        <div id="task-list" class="stack-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

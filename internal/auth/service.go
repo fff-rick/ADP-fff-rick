@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"adp/internal/model"
@@ -17,6 +19,13 @@ type Service struct {
 	adminUsername string
 	adminPassword string
 	secret        []byte
+	mu            sync.RWMutex
+	users         map[string]storedUser
+}
+
+type storedUser struct {
+	password string
+	user     model.User
 }
 
 type Claims struct {
@@ -26,33 +35,86 @@ type Claims struct {
 }
 
 func NewService(adminUsername, adminPassword, secret string) *Service {
-	return &Service{
+	svc := &Service{
 		adminUsername: adminUsername,
 		adminPassword: adminPassword,
 		secret:        []byte(secret),
+		users:         make(map[string]storedUser),
 	}
+	svc.users[adminUsername] = storedUser{
+		password: adminPassword,
+		user: model.User{
+			Username: adminUsername,
+			Role:     "admin",
+		},
+	}
+	return svc
 }
 
 func (s *Service) Login(username, password string) (string, model.User, error) {
-	if username != s.adminUsername || password != s.adminPassword {
+	s.mu.RLock()
+	record, ok := s.users[username]
+	s.mu.RUnlock()
+	if !ok || password != record.password {
 		return "", model.User{}, errors.New("invalid username or password")
 	}
 
-	user := model.User{
-		Username: username,
-		Role:     "admin",
-	}
-
 	token, err := s.sign(Claims{
-		Subject: user.Username,
-		Role:    user.Role,
+		Subject: record.user.Username,
+		Role:    record.user.Role,
 		Expiry:  time.Now().Add(12 * time.Hour).Unix(),
 	})
 	if err != nil {
 		return "", model.User{}, err
 	}
 
-	return token, user, nil
+	return token, record.user, nil
+}
+
+func (s *Service) CreateUser(username, password, role string) (model.User, error) {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	role = strings.TrimSpace(role)
+	if username == "" || password == "" {
+		return model.User{}, errors.New("username and password are required")
+	}
+	if role == "" {
+		role = "operator"
+	}
+	if role != "admin" && role != "operator" {
+		return model.User{}, errors.New("role must be admin or operator")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[username]; exists {
+		return model.User{}, errors.New("user already exists")
+	}
+
+	user := model.User{
+		Username: username,
+		Role:     role,
+	}
+	s.users[username] = storedUser{
+		password: password,
+		user:     user,
+	}
+
+	return user, nil
+}
+
+func (s *Service) ListUsers() []model.User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	users := make([]model.User, 0, len(s.users))
+	for _, record := range s.users {
+		users = append(users, record.user)
+	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Username < users[j].Username
+	})
+	return users
 }
 
 func (s *Service) ParseToken(token string) (model.User, error) {
