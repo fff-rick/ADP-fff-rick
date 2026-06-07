@@ -1287,3 +1287,97 @@ internal/api/server.go                     -- 注册首页、静态资源与 das
 ## 当前结果
 
 当前项目已经具备一个可直接访问的前端控制台首页，不再只是后端 API 原型。页面现在既能展示设计稿中的主视觉与信息架构，也能调用现有认证、任务、诊断、审批与审计接口，具备基础演示和继续迭代的前端落地能力。
+
+## GitHub PR CI/CD 与 Lint 接入记录
+
+1. 确认仓库当前尚未包含 `.github/workflows`、Kubernetes manifests 和 PR 静态检查配置，因此决定在不破坏现有 Docker Compose 演示链路的前提下，补充一套独立的 GitHub PR CI/CD 流程。
+2. 新增 GitHub Actions 工作流 `/.github/workflows/pr-cicd.yml`，触发条件为：
+   - `pull_request.opened`
+   - `pull_request.reopened`
+   - `pull_request.synchronize`
+   - `pull_request.ready_for_review`
+3. 工作流编排为 3 个阶段：
+   - `lint`：执行 `golangci-lint`
+   - `test`：执行 `go test ./...`
+   - `deploy`：仅在同仓库非草稿 PR 下执行，通过 SSH 登录远程主机 `43.136.82.118` 完成部署
+4. 为避免 PR 中的低级问题直接进入远程部署阶段，新增 `.golangci.yml`，先启用一组偏稳妥的基础规则：
+   - `errcheck`
+   - `gofmt`
+   - `govet`
+   - `ineffassign`
+   - `staticcheck`
+   - `unused`
+5. 远端部署部分采用“GitHub Runner 触发、远程主机执行”的方式，新增 `scripts/remote_pr_deploy.sh`，在远端执行以下动作：
+   - 拉取最新 PR 对应代码
+   - 读取 `deploy/k8s/release.env` 中声明的镜像版本
+   - 基于最新版代码分别构建 `server`、`worker` 镜像
+   - 按配置决定本地导入镜像或推送到镜像仓库
+   - 同步运行时环境变量到 K8s Secret `adp-runtime`
+   - `kubectl apply` 基础 manifests
+   - 使用 `kubectl set image` 对 `Deployment` 执行滚动更新
+   - 等待 rollout 完成
+6. 为满足“镜像版本在提交文件中指明”的要求，新增 `deploy/k8s/release.env`，将 `ADP_IMAGE_TAG` 作为 PR 中显式维护的部署版本入口。
+7. 为满足 Kubernetes 部署要求，新增基础清单：
+   - `deploy/k8s/manifests/server-deployment.yaml`
+   - `deploy/k8s/manifests/server-service.yaml`
+   - `deploy/k8s/manifests/worker-deployment.yaml`
+8. 为方便后续维护和交接，新增 `docs/cicd.md`，记录：
+   - 工作流触发逻辑
+   - lint 规则说明
+   - GitHub Secrets 清单
+   - 远程主机前置条件
+   - Kubernetes 运行时与镜像导入策略
+   - 运行时 env 文件要求
+9. 同步更新 `README.md`，补充 PR CI/CD 与 lint 的总体说明，方便从仓库首页快速定位配置文档。
+10. 针对 GitHub `pull_request` 事件的安全边界，工作流中明确限制：
+   - 同仓库 PR：允许进入远程部署
+   - fork PR：只执行校验，不执行远程部署
+   这样可以避免把 SSH 凭据暴露给不受信任来源的 PR 代码。
+
+## 本次新增文件
+
+```text
+.github/workflows/pr-cicd.yml             -- PR 触发的 lint / test / remote deploy 工作流
+.golangci.yml                             -- Go 代码基础静态检查规则
+deploy/k8s/release.env                    -- PR 中显式维护的镜像版本文件
+deploy/k8s/manifests/server-deployment.yaml -- server Deployment
+deploy/k8s/manifests/server-service.yaml  -- server Service
+deploy/k8s/manifests/worker-deployment.yaml -- worker Deployment
+scripts/remote_pr_deploy.sh               -- 远程主机拉代码、构建镜像并滚动部署脚本
+docs/cicd.md                              -- CI/CD 与 lint 配置说明
+```
+
+## 本次修改文件
+
+```text
+README.md                                 -- 补充 PR CI/CD 与 lint 使用说明
+```
+
+## 验证结果
+
+已完成以下验证：
+
+- `bash -n scripts/remote_pr_deploy.sh`
+- `gofmt -l $(find /home/xin/work/ADP -name '*.go' | sort)` 未发现未格式化文件
+- `env GOCACHE=/tmp/adp-go-build go vet ./...` 通过
+- 检查 `.github/workflows/pr-cicd.yml` 内容，确认部署 job 依赖 `lint` 与 `test`
+
+验证中发现的环境限制：
+
+- 当前沙箱环境下直接执行 `go test ./...` 会受本机限制影响
+  - 初次失败原因为默认 `GOCACHE` 目录只读
+  - 改为 `GOCACHE=/tmp/adp-go-build` 后，编译阶段可继续推进
+- 但测试中的 `httptest` 监听本地端口时仍报 `socket: operation not permitted`
+  - 这属于当前运行环境限制，不是仓库代码或 workflow 语法错误
+  - GitHub Runner 通常不会有这类本地监听限制
+- 当前未在本机实际连接远程主机 `43.136.82.118`，因此远端部署链路尚未做联机验收
+
+## 当前结果
+
+当前仓库已经具备一条完整的 PR 质量门禁与自动部署链路：
+
+- PR 提交后先做 lint
+- lint 通过后再做测试
+- 测试通过后再触发远程构建与 Kubernetes 滚动发布
+
+同时，镜像版本已经从“部署时临时指定”收敛为“PR 中通过版本文件显式声明”，后续可以围绕 `deploy/k8s/release.env` 继续演进更细的发布约束或镜像仓库策略。
