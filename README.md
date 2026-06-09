@@ -230,3 +230,16 @@ docker compose -f deploy/docker-compose/docker-compose.yml up --build
 
 - ADP Server: `http://127.0.0.1:8080`
 - Prometheus: `http://127.0.0.1:9090`
+
+## GitHub PR CI/CD
+
+仓库已经补充了面向 PR 的 GitHub Actions 流水线：
+
+- PR 打开、重新打开、追加提交时自动触发
+- 先执行 `golangci-lint`
+- 再执行 `go test ./...`
+- 再通过 SSH 登录远程主机 `43.136.82.118`
+- 在远程主机同步最新 PR 代码、按 `deploy/k8s/release.env` 的版本构建镜像
+- 最后通过 Kubernetes Deployment 执行滚动发布
+
+详细配置说明见 [docs/cicd.md](./docs/cicd.md)。
