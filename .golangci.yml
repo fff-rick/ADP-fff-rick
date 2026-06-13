@@ -7,11 +7,14 @@ linters:
   default: none
   enable:
     - errcheck
-    - gofmt
     - govet
     - ineffassign
     - staticcheck
     - unused
+
+formatters:
+  enable:
+    - gofmt
 
 issues:
   max-issues-per-linter: 0

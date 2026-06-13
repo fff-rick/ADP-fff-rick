@@ -52,6 +52,21 @@ load_k3s_image() {
   rm -rf "${temp_dir}"
 }
 
+load_containerd_image() {
+  local image="$1"
+  local temp_dir
+  local archive
+  local namespace="${ADP_CONTAINERD_NAMESPACE:-k8s.io}"
+
+  require_cmd ctr
+
+  temp_dir="$(mktemp -d)"
+  archive="${temp_dir}/image.tar"
+  docker save "${image}" -o "${archive}"
+  sudo ctr -n "${namespace}" images import "${archive}"
+  rm -rf "${temp_dir}"
+}
+
 import_images_if_needed() {
   local server_image="$1"
   local worker_image="$2"
@@ -60,6 +75,10 @@ import_images_if_needed() {
   case "${runtime}" in
     ""|docker)
       log "assuming the Kubernetes runtime can access host-built Docker images"
+      ;;
+    containerd)
+      load_containerd_image "${server_image}"
+      load_containerd_image "${worker_image}"
       ;;
     kind)
       load_kind_image "${server_image}"
@@ -70,7 +89,7 @@ import_images_if_needed() {
       load_k3s_image "${worker_image}"
       ;;
     *)
-      log "unsupported ADP_K8S_RUNTIME=${runtime}; supported values: docker, kind, k3s"
+      log "unsupported ADP_K8S_RUNTIME=${runtime}; supported values: docker, containerd, kind, k3s"
       exit 1
       ;;
   esac

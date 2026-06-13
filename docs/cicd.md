@@ -54,9 +54,11 @@ PR 会自动执行 `.golangci.yml` 中定义的基础静态检查，当前启用
 - `ADP_DEPLOY_PORT`
   说明：可选；SSH 端口，默认 `22`
 - `ADP_K8S_RUNTIME`
-  说明：可选；支持 `docker`、`kind`、`k3s`，默认 `docker`
+  说明：可选；支持 `docker`、`containerd`、`kind`、`k3s`，默认 `docker`
 - `ADP_K8S_ENV_FILE`
   说明：可选；远程主机上的运行时 env 文件路径，默认 `/etc/adp/adp.env`
+- `ADP_CONTAINERD_NAMESPACE`
+  说明：可选；当 `ADP_K8S_RUNTIME=containerd` 时使用的 containerd namespace，默认 `k8s.io`
 
 ## 远程主机准备
 
@@ -70,9 +72,13 @@ PR 会自动执行 `.golangci.yml` 中定义的基础静态检查，当前启用
 
 如果 `ADP_K8S_RUNTIME=docker`，默认假设 Kubernetes 运行时能够直接读取远程主机本地构建出的 Docker 镜像。
 
+如果 `ADP_K8S_RUNTIME=containerd`，部署脚本会在远程主机本地执行 `docker build`，然后把镜像导入节点的 `containerd` `k8s.io` namespace。这个模式适用于单节点或所有工作负载都调度到当前构建节点的 Kubernetes 集群。
+
+对于标准 Kubernetes + containerd 的单节点环境，推荐优先使用 `containerd` 模式，而不是推送到镜像仓库。
+
 如果你的集群不能直接读取本地 Docker 镜像，建议两种做法二选一：
 
-1. 使用 `kind` 或 `k3s`，并把 `ADP_K8S_RUNTIME` 设为对应值
+1. 使用 `containerd`、`kind` 或 `k3s`，并把 `ADP_K8S_RUNTIME` 设为对应值
 2. 在 `deploy/k8s/release.env` 中设置 `ADP_IMAGE_REPOSITORY_PREFIX`，同时把 `ADP_PUSH_IMAGES=true`，让远程主机在构建后推送到镜像仓库
 
 示例：
@@ -124,6 +130,35 @@ ADP_LLM_MODEL=gpt-4
 3. `kubectl apply` 基础 manifests
 4. `kubectl set image` 触发 Deployment 滚动更新
 5. 等待两个 Deployment rollout 完成
+
+## 单节点 containerd 示例
+
+如果远程主机本身就是 Kubernetes 节点，且容器运行时为 `containerd`，推荐使用：
+
+```text
+ADP_K8S_RUNTIME=containerd
+ADP_CONTAINERD_NAMESPACE=k8s.io
+```
+
+同时建议在 `deploy/k8s/release.env` 中保持：
+
+```env
+ADP_IMAGE_TAG=0.1.3
+ADP_IMAGE_REPOSITORY_PREFIX=
+ADP_PUSH_IMAGES=false
+```
+
+这样 GitHub Actions 连接远程主机后，会：
+
+1. 在远程主机本地构建镜像
+2. 通过 `sudo ctr -n k8s.io images import` 导入到节点运行时
+3. 更新 Deployment 使用新的本地镜像 tag
+
+注意：
+
+- 这种方式最适合单节点集群
+- 如果 Pod 可能被调度到其他节点，其他节点也必须能拿到同一份镜像
+- 每次部署都应更新 `ADP_IMAGE_TAG`，避免复用旧镜像缓存
 
 ## 触发边界
 

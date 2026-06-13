@@ -88,6 +88,7 @@ jobs:
           DEPLOY_PORT: ${{ secrets.ADP_DEPLOY_PORT }}
           K8S_RUNTIME: ${{ secrets.ADP_K8S_RUNTIME }}
           K8S_ENV_FILE: ${{ secrets.ADP_K8S_ENV_FILE }}
+          CONTAINERD_NAMESPACE: ${{ secrets.ADP_CONTAINERD_NAMESPACE }}
         run: |
           set -eu
 
@@ -108,4 +109,5 @@ jobs:
             DEPLOY_REPO_URL="${DEPLOY_REPO_URL}" \
             ADP_K8S_RUNTIME="${K8S_RUNTIME}" \
             ADP_K8S_ENV_FILE="${K8S_ENV_FILE}" \
+            ADP_CONTAINERD_NAMESPACE="${CONTAINERD_NAMESPACE}" \
             bash -s < scripts/remote_pr_deploy.sh
