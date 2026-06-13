@@ -121,7 +121,7 @@ func mustJSONRequest(t *testing.T, client *http.Client, method, url, token strin
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if target != nil {
 		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
@@ -155,7 +155,7 @@ func mustWorkerJSONRequest(t *testing.T, client *http.Client, method, url, worke
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if target != nil {
 		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {

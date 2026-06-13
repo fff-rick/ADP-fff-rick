@@ -320,7 +320,7 @@ func doRawJSON(t *testing.T, client *http.Client, method, url string, body any, 
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if target != nil {
 		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {

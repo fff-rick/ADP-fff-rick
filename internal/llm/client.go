@@ -76,7 +76,7 @@ func (c *HTTPClient) Chat(ctx context.Context, messages []Message) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("llm call failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		var errBody struct {

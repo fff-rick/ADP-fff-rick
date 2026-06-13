@@ -137,7 +137,7 @@ func bearerToken(header string) string {
 }
 
 func decodeJSON(r *http.Request, target any) error {
-	defer r.Body.Close()
+	defer r.Body.Close() //nolint:errcheck
 
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()

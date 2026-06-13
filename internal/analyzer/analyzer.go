@@ -45,14 +45,14 @@ func (a *Analyzer) Analyze(ctx context.Context, plan model.DiagnosisPlan) (*mode
 
 func (a *Analyzer) analyzeWithLLM(ctx context.Context, plan model.DiagnosisPlan) (*model.AnalysisReport, error) {
 	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("Diagnosis plan: %s (%s)\n\n", plan.Title, plan.TriggerType))
+	summary.WriteString(fmt.Sprintf("Diagnosis plan: %s (%s)\n\n", plan.Title, plan.TriggerType)) //nolint:staticcheck
 
 	for _, step := range plan.Steps {
-		summary.WriteString(fmt.Sprintf("Step %d: %s (%s)\n", step.StepNo, step.Name, step.Description))
+		summary.WriteString(fmt.Sprintf("Step %d: %s (%s)\n", step.StepNo, step.Name, step.Description)) //nolint:staticcheck
 		if step.Result != nil {
-			summary.WriteString(fmt.Sprintf("  stdout: %s\n", truncate(step.Result.Stdout, 500)))
-			summary.WriteString(fmt.Sprintf("  stderr: %s\n", truncate(step.Result.Stderr, 500)))
-			summary.WriteString(fmt.Sprintf("  exit_code: %d, success: %v\n", step.Result.ExitCode, step.Result.Success))
+			summary.WriteString(fmt.Sprintf("  stdout: %s\n", truncate(step.Result.Stdout, 500)))                         //nolint:staticcheck
+			summary.WriteString(fmt.Sprintf("  stderr: %s\n", truncate(step.Result.Stderr, 500)))                         //nolint:staticcheck
+			summary.WriteString(fmt.Sprintf("  exit_code: %d, success: %v\n", step.Result.ExitCode, step.Result.Success)) //nolint:staticcheck
 		}
 	}
 

@@ -52,6 +52,21 @@ load_k3s_image() {
   rm -rf "${temp_dir}"
 }
 
+load_containerd_image() {
+  local image="$1"
+  local temp_dir
+  local archive
+  local namespace="${ADP_CONTAINERD_NAMESPACE:-k8s.io}"
+
+  require_cmd ctr
+
+  temp_dir="$(mktemp -d)"
+  archive="${temp_dir}/image.tar"
+  docker save "${image}" -o "${archive}"
+  sudo ctr -n "${namespace}" images import "${archive}"
+  rm -rf "${temp_dir}"
+}
+
 import_images_if_needed() {
   local server_image="$1"
   local worker_image="$2"
@@ -60,6 +75,10 @@ import_images_if_needed() {
   case "${runtime}" in
     ""|docker)
       log "assuming the Kubernetes runtime can access host-built Docker images"
+      ;;
+    containerd)
+      load_containerd_image "${server_image}"
+      load_containerd_image "${worker_image}"
       ;;
     kind)
       load_kind_image "${server_image}"
@@ -70,7 +89,7 @@ import_images_if_needed() {
       load_k3s_image "${worker_image}"
       ;;
     *)
-      log "unsupported ADP_K8S_RUNTIME=${runtime}; supported values: docker, kind, k3s"
+      log "unsupported ADP_K8S_RUNTIME=${runtime}; supported values: docker, containerd, kind, k3s"
       exit 1
       ;;
   esac
@@ -80,8 +99,7 @@ require_cmd git
 require_cmd docker
 require_cmd kubectl
 require_var GITHUB_REPOSITORY
-require_var PR_NUMBER
-require_var PR_REF
+require_var DEPLOY_REF
 require_var DEPLOY_REPO_DIR
 
 ADP_K8S_ENV_FILE="${ADP_K8S_ENV_FILE:-/etc/adp/adp.env}"
@@ -97,9 +115,11 @@ if [ -n "${DEPLOY_REPO_URL:-}" ]; then
   git -C "${DEPLOY_REPO_DIR}" remote set-url origin "${DEPLOY_REPO_URL}"
 fi
 
-log "fetching latest PR revision: ${PR_REF}"
+DEPLOY_SOURCE="${DEPLOY_SOURCE:-unknown}"
+
+log "fetching latest revision: ${DEPLOY_REF}"
 git -C "${DEPLOY_REPO_DIR}" fetch --prune origin
-git -C "${DEPLOY_REPO_DIR}" fetch origin "${PR_REF}"
+git -C "${DEPLOY_REPO_DIR}" fetch origin "${DEPLOY_REF}"
 git -C "${DEPLOY_REPO_DIR}" checkout --force FETCH_HEAD
 
 RELEASE_FILE="${DEPLOY_REPO_DIR}/deploy/k8s/release.env"
@@ -169,9 +189,9 @@ kubectl -n "${ADP_K8S_NAMESPACE}" set image deployment/"${ADP_WORKER_DEPLOYMENT_
   "${ADP_WORKER_CONTAINER_NAME}=${WORKER_IMAGE}"
 
 kubectl -n "${ADP_K8S_NAMESPACE}" annotate deployment/"${ADP_SERVER_DEPLOYMENT_NAME}" \
-  --overwrite adp.io/pr-number="${PR_NUMBER}" adp.io/revision="${PR_SHA:-unknown}"
+  --overwrite adp.io/deploy-source="${DEPLOY_SOURCE}" adp.io/revision="${DEPLOY_SHA:-unknown}"
 kubectl -n "${ADP_K8S_NAMESPACE}" annotate deployment/"${ADP_WORKER_DEPLOYMENT_NAME}" \
-  --overwrite adp.io/pr-number="${PR_NUMBER}" adp.io/revision="${PR_SHA:-unknown}"
+  --overwrite adp.io/deploy-source="${DEPLOY_SOURCE}" adp.io/revision="${DEPLOY_SHA:-unknown}"
 
 log "waiting for rollout"
 kubectl -n "${ADP_K8S_NAMESPACE}" rollout status deployment/"${ADP_SERVER_DEPLOYMENT_NAME}" --timeout=180s
