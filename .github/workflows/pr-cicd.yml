@@ -1,4 +1,4 @@
-name: PR CI/CD
+name: CI/CD
 
 on:
   pull_request:
@@ -7,9 +7,12 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+  push:
+    branches:
+      - main
 
 concurrency:
-  group: pr-cicd-${{ github.event.pull_request.number }}
+  group: ci-cd-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -18,7 +21,7 @@ permissions:
 jobs:
   lint:
     name: Lint
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -39,7 +42,7 @@ jobs:
 
   test:
     name: Test
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -59,7 +62,7 @@ jobs:
     needs:
       - lint
       - test
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     env:
       DEPLOY_HOST: 43.136.82.118
@@ -79,7 +82,7 @@ jobs:
           test -n "${DEPLOY_REPO_DIR:-}" || { echo "Missing secret: ADP_DEPLOY_REPO_DIR"; exit 1; }
           test -f deploy/k8s/release.env || { echo "Missing file: deploy/k8s/release.env"; exit 1; }
 
-      - name: Deploy latest PR revision
+      - name: Deploy latest main revision
         env:
           DEPLOY_USER: ${{ secrets.ADP_DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.ADP_DEPLOY_SSH_KEY }}
@@ -102,9 +105,9 @@ jobs:
           ssh -i ~/.ssh/adp_deploy_key -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
             env \
             GITHUB_REPOSITORY="${{ github.repository }}" \
-            PR_NUMBER="${{ github.event.pull_request.number }}" \
-            PR_REF="${{ github.ref }}" \
-            PR_SHA="${{ github.sha }}" \
+            DEPLOY_REF="${{ github.ref }}" \
+            DEPLOY_SOURCE="main" \
+            DEPLOY_SHA="${{ github.sha }}" \
             DEPLOY_REPO_DIR="${DEPLOY_REPO_DIR}" \
             DEPLOY_REPO_URL="${DEPLOY_REPO_URL}" \
             ADP_K8S_RUNTIME="${K8S_RUNTIME}" \

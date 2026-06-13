@@ -25,14 +25,16 @@
 1. PR 触发 GitHub Actions
 2. GitHub Runner 执行 `golangci-lint`
 3. GitHub Runner 执行 `go test ./...`
-4. 校验通过后，Runner 通过 SSH 登录 `43.136.82.118`
-5. 远程主机拉取当前 PR 对应代码
-6. 远程主机本地构建 `adp-server`、`adp-worker` 镜像
-7. 远程主机执行 `sudo ctr -n k8s.io images import` 导入镜像到节点运行时
-8. 远程主机把 `/etc/adp/adp.env` 同步为 K8s Secret `adp-runtime`
-9. 远程主机 `kubectl apply` 基础 manifests
-10. 远程主机 `kubectl set image` 触发滚动更新
-11. 远程主机等待 `Deployment` rollout 成功
+4. PR 阶段只做校验，不执行远程部署
+5. 代码 merge 到 `main` 后，由 `push` 事件触发部署
+6. GitHub Runner 通过 SSH 登录 `43.136.82.118`
+7. 远程主机拉取 `main` 分支对应最新代码
+8. 远程主机本地构建 `adp-server`、`adp-worker` 镜像
+9. 远程主机执行 `sudo ctr -n k8s.io images import` 导入镜像到节点运行时
+10. 远程主机把 `/etc/adp/adp.env` 同步为 K8s Secret `adp-runtime`
+11. 远程主机 `kubectl apply` 基础 manifests
+12. 远程主机 `kubectl set image` 触发滚动更新
+13. 远程主机等待 `Deployment` rollout 成功
 
 ## 远程主机准备
 
@@ -180,6 +182,31 @@ ssh ubuntu@43.136.82.118 'sudo chown -R adpdeploy:adpdeploy /home/adpdeploy/.ssh
 ssh -i ./adp_github_actions adpdeploy@43.136.82.118
 ```
 
+### SSH 密钥放置规则
+
+这里很容易配反，规则固定如下：
+
+- GitHub Secret `ADP_DEPLOY_SSH_KEY`：放私钥全文
+- 远程主机 `/home/adpdeploy/.ssh/authorized_keys`：放对应公钥
+
+不要把公钥填进 `ADP_DEPLOY_SSH_KEY`，也不要把私钥追加到 `authorized_keys`。
+
+如果 Actions 报错：
+
+```text
+Permission denied (publickey,password)
+```
+
+优先检查：
+
+1. `ADP_DEPLOY_SSH_KEY` 是否真的是私钥全文
+2. 对应公钥是否已经追加到 `adpdeploy` 用户的 `authorized_keys`
+3. 你本地是否能先用这把私钥手动登录：
+
+```bash
+ssh -i ./adp_github_actions -p 22 adpdeploy@43.136.82.118
+```
+
 ## GitHub 仓库配置
 
 进入：
@@ -230,18 +257,25 @@ ADP_PUSH_IMAGES=false
 
 ## 第一次触发部署
 
-建议通过一个测试 PR 验证流程：
+建议按下面顺序验证：
 
 1. 创建分支
 2. 修改 `deploy/k8s/release.env` 中的 `ADP_IMAGE_TAG`
 3. 提交并推送分支
-4. 创建非 draft PR
+4. 创建非 draft PR，观察 `lint` 和 `test`
+5. 确认 PR 阶段不会执行 `deploy`
+6. 将 PR merge 到 `main`
+7. merge 后观察 `main` 分支上的 `push` workflow 执行 `deploy`
 
 工作流会依次执行：
 
-1. `lint`
-2. `test`
-3. `deploy`
+1. PR 阶段：
+   - `lint`
+   - `test`
+2. merge 到 `main` 后：
+   - `lint`
+   - `test`
+   - `deploy`
 
 ## 部署后检查
 
@@ -261,6 +295,30 @@ kubectl -n adp logs deployment/adp-worker --tail=100
 ```bash
 sudo grep '^ADP_ADMIN_PASSWORD=' /etc/adp/adp.env
 ```
+
+## 常见问题
+
+### 1. 为什么 PR 阶段就开始部署了
+
+旧版 workflow 会在同仓库 PR 更新时直接执行 `deploy`。当前仓库已经调整为：
+
+- PR 只做 `lint` 和 `test`
+- 只有 `main` 分支收到新的 `push` 才执行部署
+
+如果你仍然在 PR 阶段看到部署，通常说明触发运行的还是旧版 workflow，需要等包含新 workflow 的提交合并后再看下一次执行结果。
+
+### 2. `ADP_DEPLOY_REPO_URL` 应该填什么
+
+必须填写仓库的 clone URL，不是仓库主页 URL。
+
+正确示例：
+
+- `https://github.com/<owner>/<repo>.git`
+- `git@github.com:<owner>/<repo>.git`
+
+错误示例：
+
+- `https://github.com/<owner>/<repo>`
 
 ## 注意事项
 

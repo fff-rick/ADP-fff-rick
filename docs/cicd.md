@@ -1,12 +1,12 @@
-# GitHub PR CI/CD
+# GitHub CI/CD
 
-本仓库提供了一条面向 PR 的 GitHub Actions 流水线：
+本仓库提供了一条“PR 做校验，合并到主分支后部署”的 GitHub Actions 流水线：
 
 1. PR 打开、重新打开、更新提交时触发
 2. 在 GitHub Runner 上执行 `golangci-lint`
 3. 在 GitHub Runner 上执行 `go test ./...`
-4. 通过 SSH 连接远程主机 `43.136.82.118`
-5. 在远程主机同步最新 PR 代码
+4. 代码合并到 `main` 后，由 `push` 事件触发部署
+5. 通过 SSH 连接远程主机 `43.136.82.118`
 6. 按 `deploy/k8s/release.env` 中声明的版本构建 `server`、`worker` 镜像
 7. 将 Deployment 镜像更新到新版本，并等待滚动发布完成
 
@@ -46,7 +46,7 @@ PR 会自动执行 `.golangci.yml` 中定义的基础静态检查，当前启用
 - `ADP_DEPLOY_USER`
   说明：远程主机 SSH 用户名
 - `ADP_DEPLOY_SSH_KEY`
-  说明：用于登录远程主机的私钥内容
+  说明：用于登录远程主机的私钥内容。GitHub Secret 中放私钥，远程主机 `~/.ssh/authorized_keys` 中放对应公钥
 - `ADP_DEPLOY_REPO_DIR`
   说明：远程主机上的仓库目录，例如 `/srv/adp`
 - `ADP_DEPLOY_REPO_URL`
@@ -162,9 +162,9 @@ ADP_PUSH_IMAGES=false
 
 ## 触发边界
 
-由于 GitHub 对 `pull_request` 事件中的 secrets 有保护限制：
+当前触发边界为：
 
-- 同仓库 PR：会执行完整部署
-- fork PR：不会进入远程部署步骤
+- 任意 PR：只执行 `lint` 和 `test`
+- `main` 分支收到新的 `push`：执行远程部署
 
-这能避免把远程 SSH 凭据暴露给不受信任的 PR 代码。
+这种方式既能保留 PR 质量门禁，也能避免在未合并代码上提前部署。

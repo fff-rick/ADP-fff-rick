@@ -99,8 +99,7 @@ require_cmd git
 require_cmd docker
 require_cmd kubectl
 require_var GITHUB_REPOSITORY
-require_var PR_NUMBER
-require_var PR_REF
+require_var DEPLOY_REF
 require_var DEPLOY_REPO_DIR
 
 ADP_K8S_ENV_FILE="${ADP_K8S_ENV_FILE:-/etc/adp/adp.env}"
@@ -116,9 +115,11 @@ if [ -n "${DEPLOY_REPO_URL:-}" ]; then
   git -C "${DEPLOY_REPO_DIR}" remote set-url origin "${DEPLOY_REPO_URL}"
 fi
 
-log "fetching latest PR revision: ${PR_REF}"
+DEPLOY_SOURCE="${DEPLOY_SOURCE:-unknown}"
+
+log "fetching latest revision: ${DEPLOY_REF}"
 git -C "${DEPLOY_REPO_DIR}" fetch --prune origin
-git -C "${DEPLOY_REPO_DIR}" fetch origin "${PR_REF}"
+git -C "${DEPLOY_REPO_DIR}" fetch origin "${DEPLOY_REF}"
 git -C "${DEPLOY_REPO_DIR}" checkout --force FETCH_HEAD
 
 RELEASE_FILE="${DEPLOY_REPO_DIR}/deploy/k8s/release.env"
@@ -188,9 +189,9 @@ kubectl -n "${ADP_K8S_NAMESPACE}" set image deployment/"${ADP_WORKER_DEPLOYMENT_
   "${ADP_WORKER_CONTAINER_NAME}=${WORKER_IMAGE}"
 
 kubectl -n "${ADP_K8S_NAMESPACE}" annotate deployment/"${ADP_SERVER_DEPLOYMENT_NAME}" \
-  --overwrite adp.io/pr-number="${PR_NUMBER}" adp.io/revision="${PR_SHA:-unknown}"
+  --overwrite adp.io/deploy-source="${DEPLOY_SOURCE}" adp.io/revision="${DEPLOY_SHA:-unknown}"
 kubectl -n "${ADP_K8S_NAMESPACE}" annotate deployment/"${ADP_WORKER_DEPLOYMENT_NAME}" \
-  --overwrite adp.io/pr-number="${PR_NUMBER}" adp.io/revision="${PR_SHA:-unknown}"
+  --overwrite adp.io/deploy-source="${DEPLOY_SOURCE}" adp.io/revision="${DEPLOY_SHA:-unknown}"
 
 log "waiting for rollout"
 kubectl -n "${ADP_K8S_NAMESPACE}" rollout status deployment/"${ADP_SERVER_DEPLOYMENT_NAME}" --timeout=180s
