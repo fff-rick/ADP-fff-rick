@@ -25,7 +25,7 @@ func TestDashboardUIRoutesAndSummary(t *testing.T) {
 			t.Fatalf("GET %s error = %v", route, err)
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if err != nil {
 			t.Fatalf("ReadAll(%s) error = %v", route, err)
 		}
@@ -41,7 +41,7 @@ func TestDashboardUIRoutesAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /static/app.css error = %v", err)
 	}
-	defer staticResp.Body.Close()
+	defer staticResp.Body.Close() //nolint:errcheck
 	if staticResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /static/app.css status = %d, want %d", staticResp.StatusCode, http.StatusOK)
 	}

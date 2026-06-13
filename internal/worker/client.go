@@ -148,7 +148,7 @@ func (c *Client) postJSON(path string, body any, target any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		var apiErr map[string]string

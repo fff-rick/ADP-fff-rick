@@ -81,7 +81,7 @@ func TestIncidentCaseAndMetricsEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /metrics error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
