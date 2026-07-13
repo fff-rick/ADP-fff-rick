@@ -7,31 +7,35 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="home">
-  <div class="shell">
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
 
+  <div class="ambient-glow"></div>
+
+  <div class="shell" style="position: relative; z-index: 1;">
     <header class="topbar">
-      <div class="brand-block">
-        <p class="eyebrow">ADP / AI Dispatch Platform</p>
-        <h1>Worker 操作台入口</h1>
-        <p class="topbar-note">将用户、登录、Workers、Jobs、Tasks 拆成独立页面，按功能进入。</p>
+      <div class="topbar-brand">
+        ADP<em>AI Dispatch Platform</em>
       </div>
 
-      <div class="topbar-meta">
-        <div class="meta-block">
-          <span class="meta-label">Server Time</span>
-          <strong id="clock">--:--:--</strong>
-        </div>
-        <div class="meta-block">
-          <span class="meta-label">Session</span>
-          <strong id="session-state">未登录</strong>
-        </div>
-        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      <div class="topbar-right">
+        <span class="server-clock" id="clock">--:--:--</span>
+        <span class="session-badge" id="session-state">未登录</span>
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换主题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <nav class="nav-strip">
+    <nav class="nav" style="margin-bottom: 28px;">
       <a class="nav-link is-active" href="/">首页</a>
       <a class="nav-link" href="/login">登录</a>
       <a class="nav-link" href="/users">用户</a>
@@ -40,77 +44,75 @@
       <a class="nav-link" href="/tasks">Tasks</a>
     </nav>
 
-    <main class="workspace">
-      <section class="hero panel">
-        <div class="hero-copy">
-          <p class="section-kicker">Operations Navigation</p>
-          <h2>点击进入不同页面，而不是在同一页里混排全部功能</h2>
-          <p class="hero-text">首页只保留入口与状态总览。具体操作分别放到独立页面中，降低信息干扰。</p>
+    <main>
+      <!-- Quick Entry + Overview -->
+      <div class="bento-grid scroll-reveal stagger-1" style="margin-bottom: 28px;">
+        <!-- Metric Cards (Main) -->
+        <div class="bento-main">
+          <div class="panel-shell" style="height: 100%;">
+            <div class="panel-core" style="height: 100%;">
+              <div class="panel-heading">
+                <span class="panel-index">概览</span>
+                <span class="panel-title">工作台</span>
+                <span class="panel-subtitle">登录后自动刷新</span>
+              </div>
+              <div id="metrics-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+            </div>
+          </div>
         </div>
 
-        <div class="subpanel">
-          <div class="subpanel-head">
-            <h4>快速入口</h4>
-          </div>
-          <div class="entry-grid">
-            <a class="entry-card" href="/login">
-              <strong>登录</strong>
-              <span>进入认证页面</span>
-            </a>
-            <a class="entry-card" href="/users">
-              <strong>用户</strong>
-              <span>创建与查看用户</span>
-            </a>
-            <a class="entry-card" href="/workers">
-              <strong>Workers</strong>
-              <span>创建与查看 Worker</span>
-            </a>
-            <a class="entry-card" href="/jobs">
-              <strong>Jobs</strong>
-              <span>创建与查看 Job</span>
-            </a>
-            <a class="entry-card" href="/tasks">
-              <strong>Tasks</strong>
-              <span>解析与运行 Task</span>
-            </a>
+        <!-- Quick Entry -->
+        <div>
+          <div class="panel-shell" style="height: 100%;">
+            <div class="panel-core" style="height: 100%;">
+              <div class="panel-heading">
+                <span class="panel-index">入口</span>
+                <span class="panel-title">快速导航</span>
+              </div>
+              <div class="entry-grid">
+                <a class="entry-card" href="/login"><span class="entry-card-title">登录</span><span class="entry-card-desc">认证页面</span></a>
+                <a class="entry-card" href="/users"><span class="entry-card-title">用户</span><span class="entry-card-desc">创建与查看</span></a>
+                <a class="entry-card" href="/workers"><span class="entry-card-title">Workers</span><span class="entry-card-desc">节点管理</span></a>
+                <a class="entry-card" href="/jobs"><span class="entry-card-title">Jobs</span><span class="entry-card-desc">任务调度</span></a>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
 
-      <section class="overview-grid">
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">01</span>
-            <div>
-              <h3>工作台概览</h3>
-              <p>登录后自动刷新</p>
+        <!-- Tasks Quick Entry -->
+        <div>
+          <div class="panel-shell" style="height: 100%;">
+            <div class="panel-core" style="height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 12px;">
+              <span style="font-family: var(--font-mono); font-size: 2.25rem; font-weight: 600; color: var(--accent);">→</span>
+              <a class="entry-card-title" href="/tasks">Task 控制台</a>
+              <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">NL 任务解析与运行</p>
             </div>
           </div>
-          <div id="metrics-grid" class="metrics-grid"></div>
-        </article>
+        </div>
+      </div>
 
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">02</span>
-            <div>
-              <h3>待审批任务</h3>
-              <p>最近需要人工确认的任务</p>
+      <!-- Approvals + Audit -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;" class="scroll-reveal stagger-2">
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">审批</span>
+              <span class="panel-title">待审批任务</span>
             </div>
+            <div id="approval-list"></div>
           </div>
-          <div id="approval-list" class="stack-list"></div>
-        </article>
+        </div>
 
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">03</span>
-            <div>
-              <h3>审计记录</h3>
-              <p>最近操作留痕</p>
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">审计</span>
+              <span class="panel-title">审计记录</span>
             </div>
+            <div id="audit-list"></div>
           </div>
-          <div id="audit-list" class="stack-list"></div>
-        </article>
-      </section>
+        </div>
+      </div>
     </main>
   </div>
 

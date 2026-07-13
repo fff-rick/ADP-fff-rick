@@ -10,7 +10,6 @@ const page = document.body.dataset.page || "home";
 const elements = {
   clock: byId("clock"),
   sessionState: byId("session-state"),
-  refreshPage: byId("refresh-page"),
   toast: byId("toast"),
   loginForm: byId("login-form"),
   loginMessage: byId("login-message"),
@@ -31,15 +30,18 @@ const elements = {
   taskOutput: byId("task-output"),
   taskList: byId("task-list"),
   templateList: byId("template-list"),
+  themeToggle: byId("theme-toggle"),
 };
 
 boot();
 
 function boot() {
   startClock();
+  initTheme();
   bindCommonEvents();
   updateSessionState();
   renderLoggedOutPlaceholders();
+  initScrollReveal();
 
   if (state.token) {
     refreshCurrentPage();
@@ -47,19 +49,63 @@ function boot() {
   }
 }
 
-function bindCommonEvents() {
-  elements.refreshPage?.addEventListener("click", () => refreshCurrentPage());
-  elements.logoutButton?.addEventListener("click", handleLogout);
-  elements.loginForm?.addEventListener("submit", handleLogin);
-  elements.userForm?.addEventListener("submit", handleCreateUser);
-  elements.workerForm?.addEventListener("submit", handleCreateWorker);
-  elements.jobForm?.addEventListener("submit", handleCreateJob);
-  elements.taskForm?.addEventListener("submit", handleTaskSubmit);
-  elements.approvalList?.addEventListener("click", handleApprovalAction);
+/* ── Theme ── */
+
+function initTheme() {
+  const saved = window.localStorage.getItem("adp.theme");
+  if (saved) {
+    document.documentElement.setAttribute("data-theme", saved);
+  }
 }
 
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme");
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  window.localStorage.setItem("adp.theme", next);
+}
+
+/* ── Scroll Reveal ── */
+
+function initScrollReveal() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.querySelectorAll(".scroll-reveal").forEach(function(el) {
+      el.classList.add("scroll-reveal-visible");
+    });
+    return;
+  }
+
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("scroll-reveal-visible");
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll(".scroll-reveal").forEach(function(el) {
+    observer.observe(el);
+  });
+}
+
+/* ── Event Binding ── */
+
+function bindCommonEvents() {
+  elements.logoutButton && elements.logoutButton.addEventListener("click", handleLogout);
+  elements.loginForm && elements.loginForm.addEventListener("submit", handleLogin);
+  elements.userForm && elements.userForm.addEventListener("submit", handleCreateUser);
+  elements.workerForm && elements.workerForm.addEventListener("submit", handleCreateWorker);
+  elements.jobForm && elements.jobForm.addEventListener("submit", handleCreateJob);
+  elements.taskForm && elements.taskForm.addEventListener("submit", handleTaskSubmit);
+  elements.approvalList && elements.approvalList.addEventListener("click", handleApprovalAction);
+  elements.themeToggle && elements.themeToggle.addEventListener("click", toggleTheme);
+}
+
+/* ── Clock ── */
+
 function startClock() {
-  const tick = () => {
+  var tick = function() {
     if (elements.clock) {
       elements.clock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
     }
@@ -68,17 +114,19 @@ function startClock() {
   window.setInterval(tick, 1000);
 }
 
+/* ── Auth Handlers ── */
+
 async function handleLogin(event) {
   event.preventDefault();
 
-  const formData = new FormData(elements.loginForm);
-  const username = String(formData.get("username") || "").trim();
-  const password = String(formData.get("password") || "").trim();
+  var formData = new FormData(elements.loginForm);
+  var username = String(formData.get("username") || "").trim();
+  var password = String(formData.get("password") || "").trim();
 
   try {
-    const result = await request("/api/v1/auth/login", {
+    var result = await request("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: username, password: password }),
     });
     state.token = result.token;
     state.user = result.user;
@@ -123,14 +171,14 @@ function handleLogout() {
   showToast("已退出登录");
 }
 
+/* ── CRUD Handlers ── */
+
 async function handleCreateUser(event) {
   event.preventDefault();
-  if (!ensureAuthed()) {
-    return;
-  }
+  if (!ensureAuthed()) return;
 
   try {
-    const user = await authedRequest("/api/v1/users", {
+    var user = await authedRequest("/api/v1/users", {
       method: "POST",
       body: JSON.stringify({
         username: valueOf("new-username"),
@@ -140,7 +188,7 @@ async function handleCreateUser(event) {
     });
     elements.userForm.reset();
     byId("new-role").value = "operator";
-    showToast(`用户 ${user.username} 已创建`);
+    showToast("用户 " + user.username + " 已创建");
     await refreshUsersPage();
   } catch (error) {
     showToast(error.message);
@@ -149,12 +197,10 @@ async function handleCreateUser(event) {
 
 async function handleCreateWorker(event) {
   event.preventDefault();
-  if (!ensureAuthed()) {
-    return;
-  }
+  if (!ensureAuthed()) return;
 
   try {
-    const worker = await authedRequest("/api/v1/workers", {
+    var worker = await authedRequest("/api/v1/workers", {
       method: "POST",
       body: JSON.stringify({
         name: valueOf("worker-name"),
@@ -163,7 +209,7 @@ async function handleCreateWorker(event) {
     });
     elements.workerForm.reset();
     byId("worker-type").value = "shell";
-    showToast(`Worker ${worker.name} 已创建`);
+    showToast("Worker " + worker.name + " 已创建");
     await refreshWorkersPage();
   } catch (error) {
     showToast(error.message);
@@ -172,12 +218,10 @@ async function handleCreateWorker(event) {
 
 async function handleCreateJob(event) {
   event.preventDefault();
-  if (!ensureAuthed()) {
-    return;
-  }
+  if (!ensureAuthed()) return;
 
   try {
-    const job = await authedRequest("/api/v1/jobs", {
+    var job = await authedRequest("/api/v1/jobs", {
       method: "POST",
       body: JSON.stringify({
         name: valueOf("job-name"),
@@ -187,7 +231,7 @@ async function handleCreateJob(event) {
     });
     elements.jobForm.reset();
     byId("job-worker-type").value = "shell";
-    showToast(`Job ${job.id} 已创建`);
+    showToast("Job " + job.id + " 已创建");
     await refreshJobsPage();
   } catch (error) {
     showToast(error.message);
@@ -196,20 +240,18 @@ async function handleCreateJob(event) {
 
 async function handleTaskSubmit(event) {
   event.preventDefault();
-  if (!ensureAuthed()) {
-    return;
-  }
+  if (!ensureAuthed()) return;
 
-  const action = event.submitter?.dataset.action || "parse";
-  const input = elements.taskInput?.value.trim();
+  var action = (event.submitter && event.submitter.dataset.action) || "parse";
+  var input = elements.taskInput ? elements.taskInput.value.trim() : "";
   if (!input) {
     showToast("先输入任务描述");
     return;
   }
 
-  let parameters;
+  var parameters;
   try {
-    parameters = parseOptionalJSON(elements.taskParams?.value.trim() || "");
+    parameters = parseOptionalJSON((elements.taskParams ? elements.taskParams.value.trim() : "") || "");
   } catch (error) {
     showToast(error.message);
     return;
@@ -217,25 +259,25 @@ async function handleTaskSubmit(event) {
 
   try {
     if (action === "parse") {
-      const result = await authedRequest("/api/v1/tasks/parse", {
+      var parseResult = await authedRequest("/api/v1/tasks/parse", {
         method: "POST",
-        body: JSON.stringify({ input }),
+        body: JSON.stringify({ input: input }),
       });
       if (elements.taskOutput) {
-        elements.taskOutput.textContent = JSON.stringify(result, null, 2);
+        elements.taskOutput.textContent = JSON.stringify(parseResult, null, 2);
       }
       showToast("Task 解析完成");
       return;
     }
 
-    const result = await authedRequest("/api/v1/tasks/run", {
+    var runResult = await authedRequest("/api/v1/tasks/run", {
       method: "POST",
-      body: JSON.stringify({ input, parameters }),
+      body: JSON.stringify({ input: input, parameters: parameters }),
     });
     if (elements.taskOutput) {
-      elements.taskOutput.textContent = JSON.stringify(result, null, 2);
+      elements.taskOutput.textContent = JSON.stringify(runResult, null, 2);
     }
-    showToast(result.approval_required ? "Task 已进入审批队列" : "Task 已创建");
+    showToast(runResult.approval_required ? "Task 已进入审批队列" : "Task 已创建");
     await refreshTasksPage();
   } catch (error) {
     if (elements.taskOutput) {
@@ -246,29 +288,27 @@ async function handleTaskSubmit(event) {
 }
 
 async function handleApprovalAction(event) {
-  const button = event.target.closest("[data-approval-id]");
-  if (!button) {
-    return;
-  }
-  if (!ensureAuthed()) {
-    return;
-  }
+  var button = event.target.closest("[data-approval-id]");
+  if (!button) return;
+  if (!ensureAuthed()) return;
 
-  const approved = button.dataset.decision === "approve";
+  var approved = button.dataset.decision === "approve";
   try {
-    const result = await authedRequest(`/api/v1/approvals/jobs/${button.dataset.approvalId}`, {
+    var result = await authedRequest("/api/v1/approvals/jobs/" + button.dataset.approvalId, {
       method: "POST",
       body: JSON.stringify({
-        approved,
+        approved: approved,
         comment: approved ? "Approved from UI" : "Rejected from UI",
       }),
     });
-    showToast(approved ? `已批准 ${result.id}` : `已拒绝 ${result.id}`);
+    showToast(approved ? "已批准 " + result.id : "已拒绝 " + result.id);
     await refreshCurrentPage();
   } catch (error) {
     showToast(error.message);
   }
 }
+
+/* ── Page Refresh ── */
 
 async function refreshCurrentPage() {
   if (!state.token) {
@@ -307,13 +347,13 @@ async function refreshCurrentPage() {
 }
 
 async function refreshSessionOnly() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
 }
 
 async function refreshHomePage() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
   renderSummaryMetrics(summary);
@@ -322,7 +362,7 @@ async function refreshHomePage() {
 }
 
 async function refreshUsersPage() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
 
@@ -330,7 +370,7 @@ async function refreshUsersPage() {
     if (elements.usersAccessNote) {
       elements.usersAccessNote.textContent = "当前账户不是管理员，无法查看或创建用户。";
     }
-    renderList(elements.userList, [], () => "", "请使用管理员账户登录。");
+    renderList(elements.userList, [], function() { return ""; }, "请使用管理员账户登录。");
     return;
   }
 
@@ -338,182 +378,167 @@ async function refreshUsersPage() {
     elements.usersAccessNote.textContent = "当前为管理员，可创建与查看用户。";
   }
 
-  const users = await authedRequest("/api/v1/users");
+  var users = await authedRequest("/api/v1/users");
   renderList(
     elements.userList,
     users,
-    (user) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(user.username)}</h4>
-            <p>角色：${escapeHTML(user.role)}</p>
-          </div>
-          <span class="status-pill">${escapeHTML(user.role)}</span>
-        </div>
-      </article>
-    `,
+    function(user) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(user.username) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 10px;">' + escapeHTML(user.role) + '</span>' +
+        '</div>' +
+        '<span class="status-pill" style="background: var(--info-bg); color: var(--info);">' + escapeHTML(user.role) + '</span>' +
+      '</div>';
+    },
     "暂无用户。"
   );
 }
 
 async function refreshWorkersPage() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
 
-  const workers = await authedRequest("/api/v1/workers");
+  var workers = await authedRequest("/api/v1/workers");
   renderList(
     elements.workerList,
     workers,
-    (worker) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(worker.name)}</h4>
-            <p>${escapeHTML(worker.id)} / ${escapeHTML(worker.worker_type)}</p>
-          </div>
-          <span class="status-pill ${statusClass(worker.status)}">${escapeHTML(worker.status)}</span>
-        </div>
-        <div class="list-meta">
-          <span>最近心跳 ${formatTime(worker.last_heartbeat_at)}</span>
-          <span>创建于 ${formatTime(worker.created_at)}</span>
-        </div>
-      </article>
-    `,
+    function(worker) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(worker.name) + '</strong>' +
+          '<span class="mono" style="font-size: 0.6875rem; color: var(--text-tertiary); margin-left: 8px;">' + escapeHTML(worker.id) + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill ' + statusClass(worker.status) + '"><span class="status-dot"></span>' + escapeHTML(worker.status) + '</span>' +
+          '<span>' + formatTime(worker.last_heartbeat_at) + '</span>' +
+        '</div>' +
+      '</div>';
+    },
     "暂无 Worker。"
   );
 }
 
 async function refreshJobsPage() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
 
-  const jobs = await authedRequest("/api/v1/jobs?limit=16");
+  var jobs = await authedRequest("/api/v1/jobs?limit=16");
   renderList(
     elements.jobList,
     jobs,
-    (job) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(job.name)}</h4>
-            <p>${escapeHTML(job.command || "无命令详情")}</p>
-          </div>
-          <span class="status-pill ${statusClass(job.status)}">${escapeHTML(job.status)}</span>
-        </div>
-        <div class="list-meta">
-          <span>${escapeHTML(job.id)}</span>
-          <span>${escapeHTML(job.worker_type)}</span>
-          <span>${escapeHTML(job.source_type || "manual_job")}</span>
-          <span>${formatTime(job.updated_at)}</span>
-        </div>
-      </article>
-    `,
+    function(job) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(job.name) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(job.command || "无命令详情") + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill ' + statusClass(job.status) + '"><span class="status-dot"></span>' + escapeHTML(job.status) + '</span>' +
+          '<span class="mono">' + escapeHTML(job.worker_type) + '</span>' +
+          '<span>' + formatTime(job.updated_at) + '</span>' +
+        '</div>' +
+      '</div>';
+    },
     "暂无 Job。"
   );
   renderApprovals(summary.pending_approvals);
 }
 
 async function refreshTasksPage() {
-  const summary = await authedRequest("/api/v1/dashboard/summary");
+  var summary = await authedRequest("/api/v1/dashboard/summary");
   state.user = summary.user;
   updateSessionState(summary.current_time);
 
-  const [tasks, templates] = await Promise.all([
+  var results = await Promise.all([
     authedRequest("/api/v1/tasks"),
     authedRequest("/api/v1/templates"),
   ]);
+  var tasks = results[0];
+  var templates = results[1];
 
   renderList(
     elements.taskList,
     tasks,
-    (task) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(task.name)}</h4>
-            <p>${escapeHTML(task.command || "无命令详情")}</p>
-          </div>
-          <span class="status-pill ${statusClass(task.status)}">${escapeHTML(task.status)}</span>
-        </div>
-        <div class="list-meta">
-          <span>${escapeHTML(task.template_code || "--")}</span>
-          <span>风险 ${escapeHTML(task.risk_level || "--")}</span>
-          <span>${formatTime(task.created_at)}</span>
-        </div>
-      </article>
-    `,
+    function(task) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(task.name) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(task.command || "无命令详情") + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill ' + statusClass(task.status) + '"><span class="status-dot"></span>' + escapeHTML(task.status) + '</span>' +
+          '<span class="mono">' + escapeHTML(task.template_code || "--") + '</span>' +
+          '<span>' + formatTime(task.created_at) + '</span>' +
+        '</div>' +
+      '</div>';
+    },
     "暂无 Task 记录。"
   );
 
   renderList(
     elements.templateList,
     templates,
-    (template) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(template.name)}</h4>
-            <p>${escapeHTML(template.description || template.code)}</p>
-          </div>
-          <span class="status-pill">${escapeHTML(template.tool_type)}</span>
-        </div>
-        <div class="list-meta">
-          <span>${escapeHTML(template.code)}</span>
-          <span>风险 ${escapeHTML(template.risk_level)}</span>
-        </div>
-      </article>
-    `,
+    function(template) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(template.name) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(template.description || template.code) + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill" style="background: var(--accent-bg); color: var(--accent);">' + escapeHTML(template.tool_type) + '</span>' +
+          '<span class="mono">' + escapeHTML(template.code) + '</span>' +
+        '</div>' +
+      '</div>';
+    },
     "暂无模板。"
   );
 }
 
+/* ── Render Helpers ── */
+
 function renderSummaryMetrics(summary) {
-  if (!elements.metricsGrid) {
-    return;
-  }
-  const metrics = [
-    ["在线 Workers", summary.metrics.workers_online, `${summary.workers.length} 个 Worker 已注册`],
-    ["Jobs 总数", summary.metrics.jobs_total, `${summary.metrics.jobs_success} 成功 / ${summary.metrics.jobs_failed} 失败`],
-    ["待审批", summary.metrics.jobs_waiting_approval, "高风险任务等待人工确认"],
+  if (!elements.metricsGrid) return;
+
+  var metrics = [
+    ["在线 Workers", summary.metrics.workers_online, summary.workers.length + " 个已注册"],
+    ["Jobs 总数", summary.metrics.jobs_total, summary.metrics.jobs_success + " 成功 / " + summary.metrics.jobs_failed + " 失败"],
+    ["待审批", summary.metrics.jobs_waiting_approval, "等待人工确认"],
     ["模板总数", summary.templates_total, "可用于 Task 解析"],
   ];
 
-  elements.metricsGrid.innerHTML = metrics.map(([label, value, note]) => `
-    <article class="metric-card">
-      <p class="section-kicker">${escapeHTML(String(label))}</p>
-      <strong>${escapeHTML(String(value))}</strong>
-      <p>${escapeHTML(String(note))}</p>
-    </article>
-  `).join("");
+  elements.metricsGrid.innerHTML = metrics.map(function(m) {
+    return '<div class="metric-card">' +
+      '<div class="metric-label">' + escapeHTML(String(m[0])) + '</div>' +
+      '<div class="metric-value">' + escapeHTML(String(m[1])) + '</div>' +
+      '<div class="metric-desc">' + escapeHTML(String(m[2])) + '</div>' +
+    '</div>';
+  }).join("");
 }
 
 function renderApprovals(items) {
   renderList(
     elements.approvalList,
     items,
-    (job) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(job.name)}</h4>
-            <p>${escapeHTML(job.command || "无命令详情")}</p>
-          </div>
-          <span class="status-pill ${statusClass(job.status)}">${escapeHTML(job.status)}</span>
-        </div>
-        <div class="list-meta">
-          <span>风险 ${escapeHTML(job.risk_level || "--")}</span>
-          <span>${escapeHTML(job.worker_type)}</span>
-          <span>${formatTime(job.created_at)}</span>
-        </div>
-        <div class="command-actions">
-          <button class="primary-button" type="button" data-approval-id="${escapeHTML(job.id)}" data-decision="approve">批准</button>
-          <button class="ghost-button" type="button" data-approval-id="${escapeHTML(job.id)}" data-decision="reject">拒绝</button>
-        </div>
-      </article>
-    `,
+    function(job) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(job.name) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(job.command || "无命令详情") + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill ' + statusClass(job.status) + '"><span class="status-dot"></span>' + escapeHTML(job.status) + '</span>' +
+          '<span>' + escapeHTML(job.risk_level || "--") + '</span>' +
+          '<span>' + formatTime(job.created_at) + '</span>' +
+        '</div>' +
+        '<div style="display: flex; gap: 6px; margin-left: 12px;">' +
+          '<button class="btn btn-xs btn-primary" type="button" data-approval-id="' + escapeHTML(job.id) + '" data-decision="approve">批准</button>' +
+          '<button class="btn btn-xs btn-ghost" type="button" data-approval-id="' + escapeHTML(job.id) + '" data-decision="reject">拒绝</button>' +
+        '</div>' +
+      '</div>';
+    },
     "当前没有待审批任务。"
   );
 }
@@ -522,20 +547,18 @@ function renderAuditLogs(items) {
   renderList(
     elements.auditList,
     items,
-    (log) => `
-      <article class="list-card">
-        <div class="list-row">
-          <div>
-            <h4>${escapeHTML(log.action)}</h4>
-            <p>${escapeHTML(`${log.actor_type}:${log.actor_id} -> ${log.resource_type}:${log.resource_id}`)}</p>
-          </div>
-          <span class="status-pill">${escapeHTML(log.resource_type)}</span>
-        </div>
-        <div class="list-meta">
-          <span>${formatTime(log.created_at)}</span>
-        </div>
-      </article>
-    `,
+    function(log) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(log.action) + '</strong>' +
+          '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(log.actor_type + ":" + log.actor_id + " -> " + log.resource_type + ":" + log.resource_id) + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="status-pill" style="background: var(--surface-inset); color: var(--text-secondary);">' + escapeHTML(log.resource_type) + '</span>' +
+          '<span>' + formatTime(log.created_at) + '</span>' +
+        '</div>' +
+      '</div>';
+    },
     "暂无审计记录。"
   );
 }
@@ -544,13 +567,13 @@ function renderLoggedOutPlaceholders() {
   if (elements.loginMessage && page === "login") {
     elements.loginMessage.textContent = "登录后即可进入用户、Workers、Jobs、Tasks 页面进行操作。";
   }
-  renderList(elements.userList, [], () => "", "登录后显示用户列表。");
-  renderList(elements.workerList, [], () => "", "登录后显示 Worker 列表。");
-  renderList(elements.jobList, [], () => "", "登录后显示 Job 列表。");
-  renderList(elements.taskList, [], () => "", "登录后显示 Task 记录。");
-  renderList(elements.templateList, [], () => "", "登录后显示模板。");
-  renderList(elements.approvalList, [], () => "", "登录后显示待审批任务。");
-  renderList(elements.auditList, [], () => "", "登录后显示审计记录。");
+  renderList(elements.userList, [], function() { return ""; }, "登录后显示用户列表。");
+  renderList(elements.workerList, [], function() { return ""; }, "登录后显示 Worker 列表。");
+  renderList(elements.jobList, [], function() { return ""; }, "登录后显示 Job 列表。");
+  renderList(elements.taskList, [], function() { return ""; }, "登录后显示 Task 记录。");
+  renderList(elements.templateList, [], function() { return ""; }, "登录后显示模板。");
+  renderList(elements.approvalList, [], function() { return ""; }, "登录后显示待审批任务。");
+  renderList(elements.auditList, [], function() { return ""; }, "登录后显示审计记录。");
   if (elements.metricsGrid) {
     elements.metricsGrid.innerHTML = "";
   }
@@ -560,34 +583,30 @@ function renderLoggedOutPlaceholders() {
 }
 
 function renderList(container, items, renderer, emptyText) {
-  if (!container) {
-    return;
-  }
+  if (!container) return;
   if (!items || items.length === 0) {
-    container.innerHTML = `<div class="empty-state">${escapeHTML(emptyText)}</div>`;
+    container.innerHTML = '<div class="empty-state">' + escapeHTML(emptyText) + '</div>';
     return;
   }
   container.innerHTML = items.map(renderer).join("");
 }
 
 function updateSessionState(serverTime) {
-  if (!elements.sessionState) {
-    return;
-  }
-  if (state.user?.username) {
-    elements.sessionState.textContent = `${state.user.username} / ${state.user.role}`;
+  if (!elements.sessionState) return;
+  if (state.user && state.user.username) {
+    elements.sessionState.textContent = state.user.username + " / " + state.user.role;
     if (elements.loginMessage && serverTime) {
-      elements.loginMessage.textContent = `最近同步：${formatTime(serverTime)}`;
+      elements.loginMessage.textContent = "最近同步：" + formatTime(serverTime);
     }
     return;
   }
   elements.sessionState.textContent = "未登录";
 }
 
+/* ── Auth Helpers ── */
+
 function ensureAuthed() {
-  if (state.token) {
-    return true;
-  }
+  if (state.token) return true;
   showToast("请先登录");
   if (page !== "login") {
     window.location.href = "/login";
@@ -595,34 +614,29 @@ function ensureAuthed() {
   return false;
 }
 
-async function authedRequest(url, options = {}) {
-  return request(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${state.token}`,
-    },
-  });
+async function authedRequest(url, options) {
+  options = options || {};
+  options.headers = options.headers || {};
+  options.headers.Authorization = "Bearer " + state.token;
+  return request(url, options);
 }
 
-async function request(url, options = {}) {
-  const response = await window.fetch(url, {
+async function request(url, options) {
+  options = options || {};
+  var response = await window.fetch(url, {
     method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers: Object.assign({ "Content-Type": "application/json" }, options.headers || {}),
     body: options.body,
   });
 
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
+  var contentType = response.headers.get("content-type") || "";
+  var payload = contentType.includes("application/json")
     ? await response.json()
     : await response.text();
 
   if (!response.ok) {
-    const message = typeof payload === "string" ? payload : payload.error || "请求失败";
-    const error = new Error(message);
+    var message = typeof payload === "string" ? payload : (payload.error || "请求失败");
+    var error = new Error(message);
     error.code = response.status;
     throw error;
   }
@@ -630,16 +644,17 @@ async function request(url, options = {}) {
   return payload;
 }
 
+/* ── Utilities ── */
+
 function valueOf(id) {
-  return String(byId(id)?.value || "").trim();
+  var el = byId(id);
+  return el ? String(el.value || "").trim() : "";
 }
 
 function parseOptionalJSON(raw) {
-  if (!raw) {
-    return undefined;
-  }
+  if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw);
+    var parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed;
     }
@@ -650,13 +665,9 @@ function parseOptionalJSON(raw) {
 }
 
 function formatTime(value) {
-  if (!value) {
-    return "--";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
+  if (!value) return "--";
+  var date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("zh-CN", {
     hour12: false,
     month: "2-digit",
@@ -667,28 +678,28 @@ function formatTime(value) {
 }
 
 function statusClass(status) {
-  return `is-${String(status || "").toLowerCase()}`;
+  return "is-" + String(status || "").toLowerCase();
 }
 
 function showToast(message) {
-  if (!elements.toast) {
-    return;
-  }
+  if (!elements.toast) return;
   window.clearTimeout(state.toastTimer);
   elements.toast.hidden = false;
   elements.toast.textContent = message;
-  state.toastTimer = window.setTimeout(() => {
+  elements.toast.classList.add("is-visible");
+  state.toastTimer = window.setTimeout(function() {
+    elements.toast.classList.remove("is-visible");
     elements.toast.hidden = true;
   }, 2400);
 }
 
 function escapeHTML(value) {
   return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function byId(id) {
