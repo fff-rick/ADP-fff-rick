@@ -1,0 +1,7 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates bash coreutils curl grep iproute2 net-tools procps redis
+
+COPY output/adp-worker /usr/local/bin/adp-worker
+
+ENTRYPOINT ["adp-worker"]

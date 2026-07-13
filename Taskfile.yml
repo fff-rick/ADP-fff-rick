@@ -1,0 +1,17 @@
+version: '3'
+
+vars:
+  OUTPUT_DIR: output
+
+tasks:
+  build:
+    desc: Build all binaries
+    cmds:
+      - mkdir -p {{.OUTPUT_DIR}}
+      - CGO_ENABLED=0 go build -trimpath -o {{.OUTPUT_DIR}}/adp-server ./cmd/server
+      - CGO_ENABLED=0 go build -trimpath -o {{.OUTPUT_DIR}}/adp-worker ./cmd/worker
+
+  clean:
+    desc: Clean build output
+    cmds:
+      - rm -rf {{.OUTPUT_DIR}}

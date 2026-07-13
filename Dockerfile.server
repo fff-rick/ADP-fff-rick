@@ -1,0 +1,9 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY output/adp-server /usr/local/bin/adp-server
+
+EXPOSE 8080
+
+ENTRYPOINT ["adp-server"]

@@ -1,6 +1,8 @@
 # binaries
 bin/
 dist/
+server
+worker
 
 # build artifacts
 coverage/
@@ -10,6 +12,7 @@ coverage/
 # env
 .env
 .env.*
+*.env
 
 # IDE
 .idea/

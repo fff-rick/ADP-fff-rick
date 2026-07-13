@@ -46,33 +46,46 @@ ADP 是一个面向智能运维场景的原型项目，当前定义为“基于 
 - 第一阶段尽量减少依赖数量
 - 向量数据库、ELK 等非核心组件后置
 
-## 初始目录结构
+## 当前目录结构
 
 ```text
 ADP/
+  api/
+    proto/
+  bin/                         # 本地构建产物，默认不入库
   cmd/
     server/
     worker/
-  internal/
-    analyzer/
-    api/
-    auth/
-    model/
-    planner/
-    policy/
-    scheduler/
-    worker/
-  api/
-    proto/
   configs/
   deploy/
     docker-compose/
+    k8s/
   docs/
+    archive/
+    project/
+      dev-log.md
+      requirements-draft.md
+      todo.md
+  internal/
+    application/
+      analyzer/
+      parser/
+      planner/
+    domain/
+      model/
+      policy/
+      template/
+    infrastructure/
+      auth/
+      llm/
+      scheduler/
+      worker/
+    interfaces/
+      http/
   scripts/
   tests/
     integration/
   README.md
-  log.md
 ```
 
 ## Phase 0 交付物
@@ -81,11 +94,11 @@ ADP/
 - 明确系统架构边界
 - 固定初始技术栈与建议版本
 - 初始化仓库目录结构
-- 在 [log.md](./log.md) 中记录操作过程
+- 在 [docs/project/dev-log.md](./docs/project/dev-log.md) 中记录操作过程
 
 说明：
 
-- `go.mod` 暂未在 Phase 0 创建，因为模块路径最好与最终仓库命名或远端地址保持一致，等仓库信息稳定后再初始化更稳妥
+- 仓库已经初始化为 `module adp`，后续如需与远端仓库路径对齐，可再统一调整模块名
 
 ## 下一步
 
@@ -106,7 +119,7 @@ ADP/
 - Phase 4：风控与人工确认（`waiting_approval`、人工审批接口、全链路审计日志）
 - Phase 5：经验库与可观测性（故障案例入库、历史案例查询、相似建议、Prometheus 指标）
 
-详细实现说明见 [docs/phase1.md](./docs/phase1.md) 和 [log.md](./log.md)。
+详细实现说明见 [docs/phase1.md](./docs/phase1.md) 和 [docs/project/dev-log.md](./docs/project/dev-log.md)。
 
 ## 本地运行
 
@@ -198,7 +211,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/diagnosis/plan/plan-000001/analyze \
 1. 运行当前核心包测试：
 
 ```bash
-go test ./internal/api ./internal/scheduler ./internal/analyzer
+go test ./internal/interfaces/http ./internal/infrastructure/scheduler ./internal/application/analyzer
 ```
 
 2. 运行 Phase 6 集成验收测试：
@@ -209,7 +222,7 @@ go test ./tests/integration/...
 
 说明：
 
-- 当前完整 `go test ./...` 在这台开发机上仍会受本机 Application Control 策略影响，`internal/planner` 的临时测试二进制可能被拦截
+- 当前完整 `go test ./...` 在这台开发机上仍会受本机 Application Control 策略影响，`internal/application/planner` 的临时测试二进制可能被拦截
 - 已确认与 Phase 4、Phase 5、Phase 6 直接相关的定向测试可以正常运行
 
 ## Docker Compose 演示

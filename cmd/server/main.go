@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"adp/internal/api"
+	"adp/internal/interfaces/http"
 )
 
 func main() {
