@@ -42,7 +42,6 @@ function boot() {
   updateSessionState();
   renderLoggedOutPlaceholders();
   initScrollReveal();
-
   if (state.token) {
     refreshCurrentPage();
     state.refreshTimer = window.setInterval(refreshCurrentPage, 15000);
@@ -308,8 +307,8 @@ async function handleApprovalAction(event) {
   }
 }
 
-/* ── Page Refresh ── */
 
+/* ── Page Refresh ── */
 async function refreshCurrentPage() {
   if (!state.token) {
     renderLoggedOutPlaceholders();
