@@ -17,6 +17,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   lint:
@@ -24,17 +25,14 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11
           verify: true
@@ -45,72 +43,79 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Run tests
-        run: go test ./...
+      - run: go test ./...
 
-  deploy:
-    name: Deploy To Remote K8s
+  build-push:
+    name: Build & Push
     needs:
       - lint
       - test
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    env:
-      DEPLOY_HOST: 43.136.82.118
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate deployment configuration
-        env:
-          DEPLOY_USER: ${{ secrets.ADP_DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.ADP_DEPLOY_SSH_KEY }}
-          DEPLOY_REPO_DIR: ${{ secrets.ADP_DEPLOY_REPO_DIR }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Go binaries
         run: |
-          set -eu
-          test -n "${DEPLOY_USER:-}" || { echo "Missing secret: ADP_DEPLOY_USER"; exit 1; }
-          test -n "${DEPLOY_SSH_KEY:-}" || { echo "Missing secret: ADP_DEPLOY_SSH_KEY"; exit 1; }
-          test -n "${DEPLOY_REPO_DIR:-}" || { echo "Missing secret: ADP_DEPLOY_REPO_DIR"; exit 1; }
-          test -f deploy/k8s/release.env || { echo "Missing file: deploy/k8s/release.env"; exit 1; }
+          mkdir -p output
+          CGO_ENABLED=0 go build -trimpath -o output/adp-server ./cmd/server
+          CGO_ENABLED=0 go build -trimpath -o output/adp-worker ./cmd/worker
 
-      - name: Deploy latest main revision
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/adp-server:latest
+            ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }}
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/adp-worker:latest
+            ghcr.io/${{ github.repository_owner }}/adp-worker:${{ github.sha }}
+
+      - name: Sync manifests via ArgoCD
         env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ADP_DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.ADP_DEPLOY_SSH_KEY }}
-          DEPLOY_REPO_DIR: ${{ secrets.ADP_DEPLOY_REPO_DIR }}
-          DEPLOY_REPO_URL: ${{ secrets.ADP_DEPLOY_REPO_URL }}
           DEPLOY_PORT: ${{ secrets.ADP_DEPLOY_PORT }}
-          K8S_RUNTIME: ${{ secrets.ADP_K8S_RUNTIME }}
-          K8S_ENV_FILE: ${{ secrets.ADP_K8S_ENV_FILE }}
-          CONTAINERD_NAMESPACE: ${{ secrets.ADP_CONTAINERD_NAMESPACE }}
         run: |
           set -eu
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/adp_deploy_key
           chmod 600 ~/.ssh/adp_deploy_key
           ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
           ssh -i ~/.ssh/adp_deploy_key -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            env \
-            GITHUB_REPOSITORY="${{ github.repository }}" \
-            DEPLOY_REF="${{ github.ref }}" \
-            DEPLOY_SOURCE="main" \
-            DEPLOY_SHA="${{ github.sha }}" \
-            DEPLOY_REPO_DIR="${DEPLOY_REPO_DIR}" \
-            DEPLOY_REPO_URL="${DEPLOY_REPO_URL}" \
-            ADP_K8S_RUNTIME="${K8S_RUNTIME}" \
-            ADP_K8S_ENV_FILE="${K8S_ENV_FILE}" \
-            ADP_CONTAINERD_NAMESPACE="${CONTAINERD_NAMESPACE}" \
-            bash -s < scripts/remote_pr_deploy.sh
+            "kubectl set image -n adp deployment/adp-server adp-server=ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }} && \
+             kubectl set image -n adp deployment/adp-worker adp-worker=ghcr.io/${{ github.repository_owner }}/adp-worker:${{ github.sha }} && \
+             kubectl rollout status -n adp deployment/adp-server --timeout=120s && \
+             kubectl rollout status -n adp deployment/adp-worker --timeout=120s"

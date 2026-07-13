@@ -75,7 +75,7 @@
 - Docker Compose `v2`：本地部署编排
 - Prometheus `2.x`：基础可观测性
 
-## 初始源码结构
+## 当前推荐源码结构
 
 ### `cmd/server`
 
@@ -85,37 +85,34 @@
 
 Worker 进程的启动入口。
 
-### `internal/api`
+### `internal/interfaces/http`
 
-HTTP 或 gRPC 处理层，以及请求响应转换逻辑。
+接口层，负责 HTTP 路由、鉴权接入、请求响应转换和嵌入式控制台页面。
 
-### `internal/auth`
+### `internal/application/*`
 
-JWT 鉴权与权限校验逻辑。
+应用编排层，承接跨领域用例：
 
-### `internal/planner`
+- `internal/application/parser`：自然语言任务解析
+- `internal/application/planner`：诊断计划生成与计划存储
+- `internal/application/analyzer`：执行结果分析与诊断报告生成
 
-意图解析和受控执行计划生成逻辑。
+### `internal/domain/*`
 
-### `internal/policy`
+领域层，沉淀稳定业务概念与规则：
 
-风险分级、审批规则、白名单校验逻辑。
+- `internal/domain/model`：任务、诊断、审批、审计等核心模型
+- `internal/domain/policy`：风险分级、白名单与审批规则
+- `internal/domain/template`：命令模板注册、参数校验与渲染
 
-### `internal/scheduler`
+### `internal/infrastructure/*`
 
-任务排队、状态机、任务分发与重试逻辑。
+基础设施层，封装技术细节与运行时能力：
 
-### `internal/analyzer`
-
-执行结果解析、诊断摘要与修复建议生成逻辑。
-
-### `internal/worker`
-
-Worker 注册、心跳、执行编排相关逻辑。
-
-### `internal/model`
-
-跨模块共用的数据结构和领域模型。
+- `internal/infrastructure/auth`：JWT 鉴权与权限校验
+- `internal/infrastructure/llm`：统一 LLM 调用抽象
+- `internal/infrastructure/scheduler`：当前内存版任务存储、状态流转与指标快照
+- `internal/infrastructure/worker`：Worker 轮询、注册与命令执行客户端
 
 ### `api/proto`
 
@@ -124,3 +121,7 @@ Worker 注册、心跳、执行编排相关逻辑。
 ### `deploy/docker-compose`
 
 本地部署所需的编排文件。
+
+### `docs/project`
+
+项目级资料归档目录，集中存放待办、开发日志和需求草稿，避免根目录堆积过程性文档。

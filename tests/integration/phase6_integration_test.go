@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"adp/internal/api"
-	"adp/internal/model"
+	"adp/internal/domain/model"
+	"adp/internal/interfaces/http"
 )
 
 func TestPhase6Acceptance(t *testing.T) {

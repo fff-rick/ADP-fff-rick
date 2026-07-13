@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"adp/internal/worker"
+	"adp/internal/infrastructure/worker"
 )
 
 func main() {
