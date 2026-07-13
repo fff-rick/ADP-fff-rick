@@ -7,31 +7,27 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="users">
-  <div class="shell">
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
 
+  <div class="ambient-glow"></div>
+
+  <div class="shell" style="position: relative; z-index: 1;">
     <header class="topbar">
-      <div class="brand-block">
-        <p class="eyebrow">ADP / User Management</p>
-        <h1>用户页面</h1>
-        <p class="topbar-note">只处理用户的创建与查看。</p>
+      <div class="topbar-brand">
+        用户<em>User Management</em>
       </div>
 
-      <div class="topbar-meta">
-        <div class="meta-block">
-          <span class="meta-label">Server Time</span>
-          <strong id="clock">--:--:--</strong>
-        </div>
-        <div class="meta-block">
-          <span class="meta-label">Session</span>
-          <strong id="session-state">未登录</strong>
-        </div>
-        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      <div class="topbar-right">
+        <span class="server-clock" id="clock">--:--:--</span>
+        <span class="session-badge" id="session-state">未登录</span>
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换主题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <nav class="nav-strip">
+    <nav class="nav" style="margin-bottom: 28px;">
       <a class="nav-link" href="/">首页</a>
       <a class="nav-link" href="/login">登录</a>
       <a class="nav-link is-active" href="/users">用户</a>
@@ -40,54 +36,50 @@
       <a class="nav-link" href="/tasks">Tasks</a>
     </nav>
 
-    <main class="workspace">
-      <section class="page-grid">
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">01</span>
-            <div>
-              <h3>创建用户</h3>
-              <p>仅管理员可操作</p>
+    <main>
+      <div class="page-grid scroll-reveal stagger-1">
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">创建</span>
+              <span class="panel-title">用户</span>
             </div>
-          </div>
 
-          <p id="users-access-note" class="helper-text">请先以管理员身份登录。</p>
+            <p id="users-access-note" style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 16px;">请先以管理员身份登录。</p>
 
-          <form id="user-form" class="form-stack">
-            <div class="field-group">
-              <label class="field-label" for="new-username">用户名</label>
-              <input id="new-username" name="new-username" type="text" placeholder="例如：ops-user">
-            </div>
-            <div class="field-group two-up">
-              <div>
-                <label class="field-label" for="new-password">密码</label>
-                <input id="new-password" name="new-password" type="password" placeholder="设置初始密码">
+            <form id="user-form" class="form-stack">
+              <div class="field-group">
+                <label class="field-label" for="new-username">用户名</label>
+                <input class="field-input" id="new-username" name="new-username" type="text" placeholder="例如：ops-user">
               </div>
-              <div>
-                <label class="field-label" for="new-role">角色</label>
-                <select id="new-role" name="new-role">
-                  <option value="operator">operator</option>
-                  <option value="admin">admin</option>
-                </select>
+              <div class="two-up">
+                <div class="field-group">
+                  <label class="field-label" for="new-password">密码</label>
+                  <input class="field-input" id="new-password" name="new-password" type="password" placeholder="初始密码">
+                </div>
+                <div class="field-group">
+                  <label class="field-label" for="new-role">角色</label>
+                  <select class="field-select" id="new-role" name="new-role">
+                    <option value="operator">operator</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
               </div>
-            </div>
-            <div class="command-actions">
-              <button class="primary-button" type="submit">创建用户</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">02</span>
-            <div>
-              <h3>用户列表</h3>
-              <p>当前系统内可登录用户</p>
-            </div>
+              <button class="btn btn-primary" type="submit">创建用户</button>
+            </form>
           </div>
-          <div id="user-list" class="stack-list"></div>
-        </article>
-      </section>
+        </div>
+
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">列表</span>
+              <span class="panel-title">用户</span>
+            </div>
+            <div id="user-list"></div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 

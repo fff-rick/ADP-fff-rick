@@ -1,32 +1,51 @@
-# GitHub CI/CD
+# GitOps 部署体系
 
-本仓库提供了一条“PR 做校验，合并到主分支后部署”的 GitHub Actions 流水线：
+本仓库采用 GitOps 架构：CI 负责构建推送镜像到 GitHub Container Registry，ArgoCD 负责集群状态同步，SealedSecrets 管理敏感配置。
 
-1. PR 打开、重新打开、更新提交时触发
-2. 在 GitHub Runner 上执行 `golangci-lint`
-3. 在 GitHub Runner 上执行 `go test ./...`
-4. 代码合并到 `main` 后，由 `push` 事件触发部署
-5. 通过 SSH 连接远程主机 `43.136.82.118`
-6. 按 `deploy/k8s/release.env` 中声明的版本构建 `server`、`worker` 镜像
-7. 将 Deployment 镜像更新到新版本，并等待滚动发布完成
+## 架构总览
 
-## 版本文件
-
-PR 中需要更新的镜像版本位于：
-
-- `deploy/k8s/release.env`
-
-当前至少需要维护：
-
-```env
-ADP_IMAGE_TAG=0.1.0
+```
+开发者 push main
+      │
+      ▼
+GitHub Actions (lint → test → build → push ghcr → SSH 触发更新)
+      │
+      ├── ghcr.io/fff-rick/adp-server:latest
+      │   ghcr.io/fff-rick/adp-worker:latest
+      │
+      ▼
+ArgoCD（部署在 kubeadm 集群，3分钟轮询）
+      │
+      └── deploy/k8s/overlays/prod/（Kustomize + SealedSecret）
+            │
+            ▼
+         集群 Pod（imagePullPolicy: Always）
 ```
 
-建议每次触发部署时都递增或变更这个 tag，避免集群继续复用旧镜像缓存。
+与旧版的区别：
 
-## Lint 规则
+| 维度 | 旧方案 | 新方案 |
+|------|--------|--------|
+| 镜像构建 | 远程主机 `docker build` | GitHub Actions `docker build & push` |
+| 镜像存储 | 远程主机本地 | ghcr.io（GitHub Container Registry） |
+| 镜像 Tag | `release.env` 手工维护 | CI 自动 `latest` + `$SHA` 双 Tag |
+| 清单管理 | 裸 YAML（`manifests/`） | Kustomize（`base/` + `overlays/prod/`） |
+| 敏感配置 | `kubectl create secret --from-env-file` | SealedSecrets 加密后提交 Git |
+| 部署触发 | SSH 远程执行脚本 | CI: `kubectl set image` / ArgoCD: 自动同步 |
+| 配置漂移修复 | 无 | ArgoCD selfHeal |
 
-PR 会自动执行 `.golangci.yml` 中定义的基础静态检查，当前启用：
+## CI 流水线
+
+工作流文件：`.github/workflows/pr-cicd.yml`
+
+```
+PR 触发：lint → test
+main push：lint → test → build → push ghcr → SSH 触发部署
+```
+
+### lint
+
+`golangci-lint v2.11`，规则配置在 `.golangci.yml`：
 
 - `errcheck`
 - `gofmt`
@@ -35,136 +54,383 @@ PR 会自动执行 `.golangci.yml` 中定义的基础静态检查，当前启用
 - `staticcheck`
 - `unused`
 
-配置文件位置：
+### test
 
-- `.golangci.yml`
-
-## GitHub Secrets
-
-在仓库 `Settings -> Secrets and variables -> Actions` 中添加：
-
-- `ADP_DEPLOY_USER`
-  说明：远程主机 SSH 用户名
-- `ADP_DEPLOY_SSH_KEY`
-  说明：用于登录远程主机的私钥内容。GitHub Secret 中放私钥，远程主机 `~/.ssh/authorized_keys` 中放对应公钥
-- `ADP_DEPLOY_REPO_DIR`
-  说明：远程主机上的仓库目录，例如 `/srv/adp`
-- `ADP_DEPLOY_REPO_URL`
-  说明：可选；当远程目录不存在时用于首次 `git clone`
-- `ADP_DEPLOY_PORT`
-  说明：可选；SSH 端口，默认 `22`
-- `ADP_K8S_RUNTIME`
-  说明：可选；支持 `docker`、`containerd`、`kind`、`k3s`，默认 `docker`
-- `ADP_K8S_ENV_FILE`
-  说明：可选；远程主机上的运行时 env 文件路径，默认 `/etc/adp/adp.env`
-- `ADP_CONTAINERD_NAMESPACE`
-  说明：可选；当 `ADP_K8S_RUNTIME=containerd` 时使用的 containerd namespace，默认 `k8s.io`
-
-## 远程主机准备
-
-远程主机需要具备：
-
-- `git`
-- `docker`
-- `kubectl`
-- 可以访问目标 Kubernetes 集群的 kubeconfig
-- 可以访问仓库源码的 Git 凭据
-
-如果 `ADP_K8S_RUNTIME=docker`，默认假设 Kubernetes 运行时能够直接读取远程主机本地构建出的 Docker 镜像。
-
-如果 `ADP_K8S_RUNTIME=containerd`，部署脚本会在远程主机本地执行 `docker build`，然后把镜像导入节点的 `containerd` `k8s.io` namespace。这个模式适用于单节点或所有工作负载都调度到当前构建节点的 Kubernetes 集群。
-
-对于标准 Kubernetes + containerd 的单节点环境，推荐优先使用 `containerd` 模式，而不是推送到镜像仓库。
-
-如果你的集群不能直接读取本地 Docker 镜像，建议两种做法二选一：
-
-1. 使用 `containerd`、`kind` 或 `k3s`，并把 `ADP_K8S_RUNTIME` 设为对应值
-2. 在 `deploy/k8s/release.env` 中设置 `ADP_IMAGE_REPOSITORY_PREFIX`，同时把 `ADP_PUSH_IMAGES=true`，让远程主机在构建后推送到镜像仓库
-
-示例：
-
-```env
-ADP_IMAGE_TAG=0.1.3
-ADP_IMAGE_REPOSITORY_PREFIX=registry.example.com/adp
-ADP_PUSH_IMAGES=true
+```bash
+go test ./...
 ```
 
-## 远程运行时配置
+### build & push
 
-部署脚本会把 `ADP_K8S_ENV_FILE` 里的环境变量同步成 K8s Secret `adp-runtime`。
+```bash
+# tokenpool 风格：先编译二进制，再复制到最简镜像
+CGO_ENABLED=0 go build -trimpath -o output/adp-server ./cmd/server
+CGO_ENABLED=0 go build -trimpath -o output/adp-worker ./cmd/worker
 
-建议远程主机上的 env 文件至少包含：
+docker build -f Dockerfile.server -t ghcr.io/fff-rick/adp-server:latest .
+docker build -f Dockerfile.worker -t ghcr.io/fff-rick/adp-worker:latest .
+
+docker push ghcr.io/fff-rick/adp-server:latest
+docker push ghcr.io/fff-rick/adp-worker:latest
+```
+
+### 触发部署
+
+CI 通过 SSH 连接服务器，执行 `kubectl set image` 触发滚动更新：
+
+```bash
+ssh adpdeploy@<host> \
+  "kubectl set image deployment/adp-server adp-server=ghcr.io/fff-rick/adp-server:$SHA && \
+   kubectl set image deployment/adp-worker adp-worker=ghcr.io/fff-rick/adp-worker:$SHA && \
+   kubectl rollout status deployment/adp-server --timeout=120s && \
+   kubectl rollout status deployment/adp-worker --timeout=120s"
+```
+
+## GitHub Secrets 清单
+
+仓库 **Settings → Secrets and variables → Actions → Secrets**：
+
+| Secret | 说明 |
+|--------|------|
+| `DEPLOY_HOST` | 服务器 IP |
+| `ADP_DEPLOY_USER` | SSH 用户名（`adpdeploy`） |
+| `ADP_DEPLOY_SSH_KEY` | SSH 私钥完整内容（`-----BEGIN` 到 `-----END`） |
+| `ADP_DEPLOY_PORT` | SSH 端口（默认 `22`） |
+
+同时确保 Settings → Actions → General → **Workflow permissions** 设为 **Read and write**（CI 需要 push 镜像到 ghcr.io）。
+
+ghcr.io 镜像需设为 **Public**（Package Settings → Change visibility），否则集群拉取需要 pull secret。
+
+## ghcr.io 镜像
+
+CI 每次推送两个 Tag：
+
+- `ghcr.io/fff-rick/adp-server:latest` — 滚动 Tag，始终指向最新
+- `ghcr.io/fff-rick/adp-server:<sha>` — 固定 Tag，对应唯一提交
+
+同理 `adp-worker`。
+
+## 本地开发构建
+
+```bash
+# 安装 task（https://taskfile.dev）
+go install github.com/go-task/task/v3/cmd/task@latest
+
+# 编译
+task build
+
+# 产物在 output/
+ls output/
+# adp-server  adp-worker
+```
+
+## Kustomize 清单结构
+
+```
+deploy/k8s/
+  base/
+    kustomization.yaml
+    server-deployment.yaml
+    server-service.yaml
+    worker-deployment.yaml
+  overlays/prod/
+    kustomization.yaml           # images override → ghcr.io/fff-rick/*
+    image-pull-secrets.yaml      # 镜像拉取密钥（镜像为 public 时可省略）
+    adp-runtime.env              # 明文模板（不提交 Git）
+    sealed-adp-runtime.yaml      # SealedSecret（加密后提交 Git）
+  argocd/
+    adp-app.yaml                 # ArgoCD Application
+```
+
+## SealedSecrets
+
+### 原理
+
+SealedSecrets 将 K8s Secret 加密为 `SealedSecret` 自定义资源，只有集群内的 controller 能解密。加密后的 YAML 可以安全提交 Git。
+
+### 修改敏感配置
+
+1. 编辑 `deploy/k8s/overlays/prod/adp-runtime.env`（不提交）
+2. 运行 `./scripts/seal-secret.sh`
+3. 提交更新后的 `sealed-adp-runtime.yaml`
+
+### 环境变量模板
 
 ```env
 ADP_SERVER_ADDR=:8080
 ADP_ADMIN_USERNAME=admin
-ADP_ADMIN_PASSWORD=replace-me
-ADP_AUTH_SECRET=replace-me
-ADP_WORKER_SHARED_TOKEN=replace-me
+ADP_ADMIN_PASSWORD=<your-password>
+ADP_AUTH_SECRET=<random-string>
+ADP_WORKER_SHARED_TOKEN=<random-string>
 ADP_SERVER_URL=http://adp-server:8080
-ADP_WORKER_NAME=worker-k8s-1
+ADP_WORKER_NAME=worker-prod-1
 ADP_WORKER_TYPE=shell
 ADP_WORKER_POLL_INTERVAL=5s
-```
-
-如需启用 LLM：
-
-```env
-ADP_LLM_BASE_URL=https://api.openai.com/v1
-ADP_LLM_API_KEY=sk-...
+ADP_LLM_BASE_URL=
+ADP_LLM_API_KEY=
 ADP_LLM_MODEL=gpt-4
 ```
 
-## Kubernetes 资源
+## ArgoCD
 
-基础资源定义位于：
+ArgoCD 部署在集群内，每 3 分钟轮询追踪 `deploy/k8s/overlays/prod/`，自动同步变更并修复配置漂移。
 
-- `deploy/k8s/manifests/server-deployment.yaml`
-- `deploy/k8s/manifests/server-service.yaml`
-- `deploy/k8s/manifests/worker-deployment.yaml`
+### 访问 ArgoCD UI
 
-部署脚本会：
+```bash
+# 获取密码
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 -d && echo
 
-1. 确保 namespace 存在
-2. 更新 `adp-runtime` Secret
-3. `kubectl apply` 基础 manifests
-4. `kubectl set image` 触发 Deployment 滚动更新
-5. 等待两个 Deployment rollout 完成
-
-## 单节点 containerd 示例
-
-如果远程主机本身就是 Kubernetes 节点，且容器运行时为 `containerd`，推荐使用：
-
-```text
-ADP_K8S_RUNTIME=containerd
-ADP_CONTAINERD_NAMESPACE=k8s.io
+# 如果已设置 NodePort 30080
+# 浏览器打开 https://<server-ip>:30080
+# 登录：admin / 上一步获取的密码
 ```
 
-同时建议在 `deploy/k8s/release.env` 中保持：
+### Application 清单
 
-```env
-ADP_IMAGE_TAG=0.1.3
-ADP_IMAGE_REPOSITORY_PREFIX=
-ADP_PUSH_IMAGES=false
+```yaml
+# deploy/k8s/argocd/adp-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: adp
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/fff-rick/ADP-fff-rick.git
+    targetRevision: main
+    path: deploy/k8s/overlays/prod
+  destination:
+    namespace: adp
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
 ```
 
-这样 GitHub Actions 连接远程主机后，会：
+## 部署用户 (adpdeploy)
 
-1. 在远程主机本地构建镜像
-2. 通过 `sudo ctr -n k8s.io images import` 导入到节点运行时
-3. 更新 Deployment 使用新的本地镜像 tag
+### 创建 Linux 用户
 
-注意：
+```bash
+sudo useradd -m -s /bin/bash adpdeploy
+sudo passwd -d adpdeploy
+```
 
-- 这种方式最适合单节点集群
-- 如果 Pod 可能被调度到其他节点，其他节点也必须能拿到同一份镜像
-- 每次部署都应更新 `ADP_IMAGE_TAG`，避免复用旧镜像缓存
+### 创建 K8s ServiceAccount 并授权
+
+```bash
+kubectl create serviceaccount adpdeploy -n adp
+
+kubectl apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: adpdeploy
+  namespace: adp
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+EOF
+
+kubectl create rolebinding adpdeploy -n adp \
+  --role=adpdeploy --serviceaccount=adp:adpdeploy
+```
+
+### 生成长期 Token 和 kubeconfig
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: adpdeploy-token
+  namespace: adp
+  annotations:
+    kubernetes.io/service-account.name: adpdeploy
+type: kubernetes.io/service-account-token
+EOF
+
+sleep 2
+
+TOKEN=$(kubectl get secret adpdeploy-token -n adp -o jsonpath='{.data.token}' | base64 -d)
+APISERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+CA_DATA=$(kubectl get secret adpdeploy-token -n adp -o jsonpath='{.data.ca\.crt}')
+
+sudo mkdir -p /home/adpdeploy/.kube
+sudo tee /home/adpdeploy/.kube/config << KUBECONFIG_EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - cluster:
+      certificate-authority-data: ${CA_DATA}
+      server: ${APISERVER}
+    name: default
+contexts:
+  - context:
+      cluster: default
+      namespace: adp
+      user: adpdeploy
+    name: adp
+current-context: adp
+users:
+  - name: adpdeploy
+    user:
+      token: ${TOKEN}
+KUBECONFIG_EOF
+
+sudo chown -R adpdeploy:adpdeploy /home/adpdeploy/.kube
+sudo chmod 600 /home/adpdeploy/.kube/config
+```
+
+### 配置 SSH 密钥
+
+在**本地开发机**生成密钥：
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-adp" -f ~/.ssh/adp_github_actions
+```
+
+在**服务器**上添加公钥（替换为实际公钥内容）：
+
+```bash
+sudo mkdir -p /home/adpdeploy/.ssh
+echo "ssh-ed25519 AAA... github-actions-adp" | sudo tee /home/adpdeploy/.ssh/authorized_keys
+sudo chmod 700 /home/adpdeploy/.ssh
+sudo chmod 600 /home/adpdeploy/.ssh/authorized_keys
+sudo chown -R adpdeploy:adpdeploy /home/adpdeploy/.ssh
+```
+
+验证：`ssh -i ~/.ssh/adp_github_actions adpdeploy@<ip> kubectl get pods -n adp`
+
+## 服务器安装清单
+
+kubeadm 集群需手动安装（一次性）：
+
+```bash
+# 1. SealedSecrets
+kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.3/controller.yaml
+kubeseal --fetch-cert > sealed-secrets-cert.pem
+
+# 2. ArgoCD
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# 3. 创建命名空间
+kubectl create namespace adp
+
+# 4. 应用 ArgoCD Application
+kubectl apply -f deploy/k8s/argocd/adp-app.yaml
+```
+
+## 国内服务器网络问题
+
+如果服务器在国内，HTTPS 访问 GitHub 和 ghcr.io 会被墙，表现为：
+
+- `curl -m 5 https://github.com` 超时/无响应
+- `kubectl describe pod` 显示 `Pulling image "ghcr.io/..."` 长时间卡住
+- ArgoCD 报 `ComparisonError: context deadline exceeded` 拉不到 Git 仓库
+
+### 解决方案：Clash 代理
+
+前提：服务器已有 Clash 代理运行，假设 HTTP 端口为 `7890`。
+
+验证代理可用：
+
+```bash
+curl -m 5 --proxy http://127.0.0.1:7890 https://github.com > /dev/null 2>&1 && echo "OK" || echo "FAIL"
+```
+
+#### 1. containerd 走代理
+
+containerd 负责拉取 ghcr.io 镜像，需要配置 systemd 环境变量：
+
+```bash
+sudo mkdir -p /etc/systemd/system/containerd.service.d
+
+sudo tee /etc/systemd/system/containerd.service.d/http-proxy.conf <<'EOF'
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local"
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart containerd
+```
+
+配置后验证：
+
+```bash
+sudo ctr image pull ghcr.io/fff-rick/adp-server:latest
+# 应该在几秒内完成
+```
+
+#### 2. ArgoCD repo-server 走代理
+
+ArgoCD 的 repo-server 负责从 GitHub 拉取仓库代码和清单：
+
+```bash
+kubectl set env deployment/argocd-repo-server -n argocd \
+  HTTP_PROXY=http://127.0.0.1:7890 \
+  HTTPS_PROXY=http://127.0.0.1:7890 \
+  NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local
+
+kubectl rollout status deployment/argocd-repo-server -n argocd --timeout=60s
+```
+
+配置后验证 ArgoCD 能否连接 GitHub：
+
+```bash
+kubectl get app -n argocd adp -o yaml | grep -A15 "status:"
+# 不应再出现 ComparisonError
+```
+
+#### 3. kubelet 走代理（可选，拉 ghcr 镜像使用）
+
+如果 containerd 配置后镜像拉取仍然缓慢，可能是 kubelet 层面也需要代理：
+
+```bash
+sudo mkdir -p /etc/systemd/system/kubelet.service.d
+
+sudo tee /etc/systemd/system/kubelet.service.d/http-proxy.conf <<'EOF'
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local"
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+```
+
+### 注意事项
+
+- Clash 的 HTTP 代理端口根据实际配置调整（常见：`7890`、`1080`、`1087`）
+- `NO_PROXY` 确保 K8s 内部流量（Service CIDR、Pod CIDR、`.svc`、`.cluster.local`）不经过代理
+- 如果 Clash 进程挂了，containerd 和 ArgoCD 都会回退到直连（即拉镜像/拉代码超时）
+
+## 完整部署步骤（新环境从零开始）
+
+1. **服务器**：安装 SealedSecrets + ArgoCD + 创建命名空间
+2. **服务器**：创建 `adpdeploy` 用户、ServiceAccount、SSH 授权
+3. **本地**：配置 GitHub Secrets（`DEPLOY_HOST`, `ADP_DEPLOY_USER`, `ADP_DEPLOY_SSH_KEY`, `ADP_DEPLOY_PORT`）
+4. **GitHub**：Settings → Actions → Read and write permissions
+5. **GitHub**：ghcr.io Package Settings → Public
+6. **提交**：将代码推送到 main 分支
+7. **观察**：GitHub Actions 自动构建部署，ArgoCD 自动同步
 
 ## 触发边界
 
-当前触发边界为：
-
-- 任意 PR：只执行 `lint` 和 `test`
-- `main` 分支收到新的 `push`：执行远程部署
-
-这种方式既能保留 PR 质量门禁，也能避免在未合并代码上提前部署。
+- **PR**：只执行 `lint` 和 `test`（Draft PR 跳过）
+- **main push**：lint → test → build → push ghcr → SSH 触发滚动更新

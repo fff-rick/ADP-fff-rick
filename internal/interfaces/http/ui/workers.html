@@ -7,31 +7,27 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="workers">
-  <div class="shell">
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
 
+  <div class="ambient-glow"></div>
+
+  <div class="shell" style="position: relative; z-index: 1;">
     <header class="topbar">
-      <div class="brand-block">
-        <p class="eyebrow">ADP / Worker Management</p>
-        <h1>Workers 页面</h1>
-        <p class="topbar-note">只处理 Worker 的创建与查看。</p>
+      <div class="topbar-brand">
+        Workers<em>Worker Management</em>
       </div>
 
-      <div class="topbar-meta">
-        <div class="meta-block">
-          <span class="meta-label">Server Time</span>
-          <strong id="clock">--:--:--</strong>
-        </div>
-        <div class="meta-block">
-          <span class="meta-label">Session</span>
-          <strong id="session-state">未登录</strong>
-        </div>
-        <button id="refresh-page" class="ghost-button" type="button">刷新</button>
+      <div class="topbar-right">
+        <span class="server-clock" id="clock">--:--:--</span>
+        <span class="session-badge" id="session-state">未登录</span>
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换主题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <nav class="nav-strip">
+    <nav class="nav" style="margin-bottom: 28px;">
       <a class="nav-link" href="/">首页</a>
       <a class="nav-link" href="/login">登录</a>
       <a class="nav-link" href="/users">用户</a>
@@ -40,43 +36,39 @@
       <a class="nav-link" href="/tasks">Tasks</a>
     </nav>
 
-    <main class="workspace">
-      <section class="page-grid">
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">01</span>
-            <div>
-              <h3>创建 Worker</h3>
-              <p>登录后可直接创建</p>
+    <main>
+      <div class="page-grid scroll-reveal stagger-1">
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">创建</span>
+              <span class="panel-title">Worker</span>
             </div>
-          </div>
 
-          <form id="worker-form" class="form-stack">
-            <div class="field-group">
-              <label class="field-label" for="worker-name">Worker 名称</label>
-              <input id="worker-name" name="worker-name" type="text" placeholder="例如：shell-east-01">
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="worker-type">Worker 类型</label>
-              <input id="worker-type" name="worker-type" type="text" value="shell" placeholder="例如：shell">
-            </div>
-            <div class="command-actions">
-              <button class="primary-button" type="submit">创建 Worker</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-heading">
-            <span class="module-index">02</span>
-            <div>
-              <h3>Worker 列表</h3>
-              <p>查看状态与心跳时间</p>
-            </div>
+            <form id="worker-form" class="form-stack">
+              <div class="field-group">
+                <label class="field-label" for="worker-name">名称</label>
+                <input class="field-input" id="worker-name" name="worker-name" type="text" placeholder="例如：shell-east-01">
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="worker-type">类型</label>
+                <input class="field-input" id="worker-type" name="worker-type" type="text" value="shell" placeholder="例如：shell">
+              </div>
+              <button class="btn btn-primary" type="submit">创建 Worker</button>
+            </form>
           </div>
-          <div id="worker-list" class="stack-list"></div>
-        </article>
-      </section>
+        </div>
+
+        <div class="panel-shell">
+          <div class="panel-core">
+            <div class="panel-heading">
+              <span class="panel-index">列表</span>
+              <span class="panel-title">Worker</span>
+            </div>
+            <div id="worker-list"></div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
