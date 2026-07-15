@@ -10,5 +10,5 @@ images:
     newName: ghcr.io/fff-rick/adp-server
     newTag: v0.1
 
-patchesStrategicMerge:
-  - image-pull-secrets.yaml
+patches:
+  - path: image-pull-secrets.yaml
