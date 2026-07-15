@@ -4,4 +4,4 @@ kind: Kustomization
 resources:
   - server-deployment.yaml
   - server-service.yaml
-  - worker-deployment.yaml
+  # - worker-deployment.yaml
