@@ -9,9 +9,6 @@ images:
   - name: adp-server
     newName: ghcr.io/fff-rick/adp-server
     newTag: latest
-  - name: adp-worker
-    newName: ghcr.io/fff-rick/adp-worker
-    newTag: latest
 
 patchesStrategicMerge:
   - image-pull-secrets.yaml

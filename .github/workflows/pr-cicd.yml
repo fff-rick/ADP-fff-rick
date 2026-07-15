@@ -71,7 +71,6 @@ jobs:
         run: |
           mkdir -p output
           CGO_ENABLED=0 go build -trimpath -o output/adp-server ./cmd/server
-          CGO_ENABLED=0 go build -trimpath -o output/adp-worker ./cmd/worker
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -90,16 +89,6 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/adp-server:latest
             ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }}
 
-      - name: Build and push worker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.worker
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/adp-worker:latest
-            ghcr.io/${{ github.repository_owner }}/adp-worker:${{ github.sha }}
-
       - name: Sync manifests via ArgoCD
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -116,6 +105,4 @@ jobs:
 
           ssh -i ~/.ssh/adp_deploy_key -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "kubectl set image -n adp deployment/adp-server adp-server=ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }} && \
-             kubectl set image -n adp deployment/adp-worker adp-worker=ghcr.io/${{ github.repository_owner }}/adp-worker:${{ github.sha }} && \
-             kubectl rollout status -n adp deployment/adp-server --timeout=120s && \
-             kubectl rollout status -n adp deployment/adp-worker --timeout=120s"
+             kubectl rollout status -n adp deployment/adp-server --timeout=120s"
