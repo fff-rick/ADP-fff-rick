@@ -8,7 +8,7 @@ resources:
 images:
   - name: adp-server
     newName: ghcr.io/fff-rick/adp-server
-    newTag: aee6758a0e57510047c94259486ef4a90e01736b
+    newTag: v0.1
 
 patchesStrategicMerge:
   - image-pull-secrets.yaml
