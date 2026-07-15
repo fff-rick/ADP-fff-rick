@@ -72,6 +72,23 @@ jobs:
           mkdir -p output
           CGO_ENABLED=0 go build -trimpath -o output/adp-server ./cmd/server
 
+      - name: Resolve image tag
+        id: image
+        run: |
+          set -eu
+          tag="$(awk '
+            $1 == "-" && $2 == "name:" && $3 == "adp-server" { found = 1; next }
+            found && $1 == "newTag:" { print $2; exit }
+          ' deploy/k8s/overlays/prod/kustomization.yaml)"
+
+          if [ -z "$tag" ]; then
+            echo "failed to resolve adp-server newTag from deploy/k8s/overlays/prod/kustomization.yaml" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using adp-server image tag: $tag"
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -87,22 +104,33 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/adp-server:latest
-            ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/adp-server:${{ steps.image.outputs.tag }}
 
-      - name: Sync manifests via ArgoCD
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.ADP_DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.ADP_DEPLOY_SSH_KEY }}
-          DEPLOY_PORT: ${{ secrets.ADP_DEPLOY_PORT }}
+      - name: Install Argo CD CLI
         run: |
           set -eu
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/adp_deploy_key
-          chmod 600 ~/.ssh/adp_deploy_key
-          ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 0755 argocd-linux-amd64 /usr/local/bin/argocd
+          argocd version --client
 
-          ssh -i ~/.ssh/adp_deploy_key -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "kubectl set image -n adp deployment/adp-server adp-server=ghcr.io/${{ github.repository_owner }}/adp-server:${{ github.sha }} && \
-             kubectl rollout status -n adp deployment/adp-server --timeout=120s"
+      - name: Sync Argo CD application
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -eu
+          argocd app sync adp \
+            --server "$ARGOCD_SERVER" \
+            --auth-token "$ARGOCD_AUTH_TOKEN" \
+            --grpc-web \
+            --insecure \
+            --prune
+
+          argocd app wait adp \
+            --server "$ARGOCD_SERVER" \
+            --auth-token "$ARGOCD_AUTH_TOKEN" \
+            --grpc-web \
+            --insecure \
+            --sync \
+            --health \
+            --timeout 300
