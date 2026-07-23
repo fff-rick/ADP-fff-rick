@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+bin
+coverage
+deploy
+docs
+server
+worker
+*.out
+*.test
+*.md
+.env
+.env.*
+*.env

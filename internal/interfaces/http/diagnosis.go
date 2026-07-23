@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"adp/internal/domain/model"
-	"adp/internal/infrastructure/scheduler"
 )
 
 type createPlanRequest struct {
@@ -31,6 +30,11 @@ func (s *Server) handleCreateDiagnosisPlan(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
+	}
+
+	// Persist to repo if available.
+	if s.repo != nil {
+		_ = s.repo.CreatePlan(*plan)
 	}
 
 	user := currentUser(r)
@@ -66,10 +70,24 @@ func (s *Server) handleDiagnosisPlanActions(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleGetDiagnosisPlan(w http.ResponseWriter, planID string) {
-	plan, ok := s.planner.Store().Get(planID)
+	var plan model.DiagnosisPlan
+	var ok bool
+
+	if s.repo != nil {
+		p, err := s.repo.GetPlan(planID)
+		if err == nil {
+			plan = p
+			ok = true
+		}
+	}
 	if !ok {
-		writeError(w, http.StatusNotFound, errors.New("plan not found"))
-		return
+		// Try the in-memory planner store.
+		p, found := s.planner.Store().Get(planID)
+		if !found {
+			writeError(w, http.StatusNotFound, errors.New("plan not found"))
+			return
+		}
+		plan = p
 	}
 
 	plan = s.syncPlanWithJobs(plan)
@@ -77,10 +95,23 @@ func (s *Server) handleGetDiagnosisPlan(w http.ResponseWriter, planID string) {
 }
 
 func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Request, planID string) {
-	updatedPlan, ok := s.planner.Store().Get(planID)
-	if !ok {
-		writeError(w, http.StatusNotFound, errors.New("plan not found"))
-		return
+	var updatedPlan model.DiagnosisPlan
+	var found bool
+
+	if s.repo != nil {
+		p, err := s.repo.GetPlan(planID)
+		if err == nil {
+			updatedPlan = p
+			found = true
+		}
+	}
+	if !found {
+		p, ok := s.planner.Store().Get(planID)
+		if !ok {
+			writeError(w, http.StatusNotFound, errors.New("plan not found"))
+			return
+		}
+		updatedPlan = p
 	}
 
 	type stepJob struct {
@@ -114,7 +145,7 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 
 		riskLevel := s.policyEng.MergeRisk(tmpl.RiskLevel)
 		waitingApproval := s.policyEng.RequiresManualApproval(riskLevel)
-		jobStatus := model.JobStatusQueued
+		jobStatus := model.JobStatusPending
 		approvalStatus := model.ApprovalStatusNotRequired
 		if waitingApproval {
 			jobStatus = model.JobStatusWaitingApproval
@@ -122,26 +153,37 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 			needsApproval = true
 		}
 
-		job := s.store.CreateJobWithOptions(
-			fmt.Sprintf("[diagnosis:%s] step %d: %s", planID, step.StepNo, step.Name),
-			tmpl.ToolType,
-			cmd,
-			scheduler.CreateJobOptions{
-				Status:           jobStatus,
-				RiskLevel:        riskLevel,
-				ApprovalRequired: waitingApproval,
-				ApprovalStatus:   approvalStatus,
-				TemplateCode:     step.TemplateCode,
-				SourceType:       "diagnosis_plan",
-				SourceID:         planID,
-			},
-		)
-		updatedPlan.Steps[i].JobID = job.ID
-		updatedPlan.Steps[i].Status = job.Status
+		if s.repo == nil {
+			writeError(w, http.StatusInternalServerError, errors.New("no store configured"))
+			return
+		}
+
+		job := model.Job{
+			Name:             fmt.Sprintf("[diagnosis:%s] step %d: %s", planID, step.StepNo, step.Name),
+			WorkerType:       tmpl.ToolType,
+			Command:          cmd,
+			Status:           jobStatus,
+			RiskLevel:        riskLevel,
+			ApprovalRequired: waitingApproval,
+			ApprovalStatus:   approvalStatus,
+			TemplateCode:     step.TemplateCode,
+			Parameters:       cloneStringMap(step.Parameters),
+			SourceType:       "diagnosis_plan",
+			SourceID:         planID,
+		}
+
+		createdJob, err := s.repo.CreateJob(job)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+
+		updatedPlan.Steps[i].JobID = createdJob.ID
+		updatedPlan.Steps[i].Status = createdJob.Status
 		created = append(created, stepJob{
 			StepNo:      step.StepNo,
-			JobID:       job.ID,
-			Status:      job.Status,
+			JobID:       createdJob.ID,
+			Status:      createdJob.Status,
 			RiskLevel:   riskLevel,
 			NeedsReview: waitingApproval,
 		})
@@ -150,7 +192,7 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 		if waitingApproval {
 			action = "diagnosis.step.waiting_approval"
 		}
-		s.recordAudit("user", user.Username, action, "job", job.ID, map[string]any{
+		s.recordAudit("user", user.Username, action, "job", createdJob.ID, map[string]any{
 			"plan_id":       planID,
 			"step_no":       step.StepNo,
 			"template_code": step.TemplateCode,
@@ -164,6 +206,10 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 	}
 	updatedPlan.UpdatedAt = time.Now()
 
+	// Persist updated plan.
+	if s.repo != nil {
+		_ = s.repo.UpdatePlan(planID, updatedPlan)
+	}
 	s.planner.Store().Update(planID, func(plan *model.DiagnosisPlan) {
 		plan.Steps = updatedPlan.Steps
 		plan.Status = updatedPlan.Status
@@ -179,10 +225,23 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAnalyzeDiagnosisPlan(w http.ResponseWriter, r *http.Request, planID string) {
-	plan, ok := s.planner.Store().Get(planID)
+	var plan model.DiagnosisPlan
+	var ok bool
+
+	if s.repo != nil {
+		p, err := s.repo.GetPlan(planID)
+		if err == nil {
+			plan = p
+			ok = true
+		}
+	}
 	if !ok {
-		writeError(w, http.StatusNotFound, errors.New("plan not found"))
-		return
+		p, found := s.planner.Store().Get(planID)
+		if !found {
+			writeError(w, http.StatusNotFound, errors.New("plan not found"))
+			return
+		}
+		plan = p
 	}
 
 	plan = s.syncPlanWithJobs(plan)
@@ -193,10 +252,34 @@ func (s *Server) handleAnalyzeDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	report.ReferenceCases = s.store.FindSimilarIncidentCases(plan.Description, plan.TriggerType, report.FaultType, 3)
-	report.HistoricalHints = buildHistoricalHints(report.ReferenceCases)
-	incidentCase := s.store.UpsertIncidentCase(plan, *report)
+	if s.repo != nil {
+		cases, _ := s.repo.FindSimilarIncidentCases(plan.Description, plan.TriggerType, report.FaultType, 3)
+		report.ReferenceCases = cases
+		report.HistoricalHints = buildHistoricalHints(cases)
 
+		incidentCase := model.IncidentCase{
+			Title:          plan.Title,
+			TriggerType:    plan.TriggerType,
+			FaultType:      report.FaultType,
+			Summary:        strings.Join(report.PossibleCauses, "; "),
+			PossibleCauses: report.PossibleCauses,
+			Suggestions:    report.Suggestions,
+			Confidence:     report.Confidence,
+		}
+		if cs, err := s.repo.UpsertIncidentCase(planID, incidentCase); err == nil {
+			_ = cs // case stored
+		}
+	} else {
+		report.ReferenceCases = []model.IncidentCase{}
+		report.HistoricalHints = []string{}
+	}
+
+	// Update plan status.
+	if s.repo != nil {
+		plan.Status = model.PlanStatusCompleted
+		plan.UpdatedAt = time.Now()
+		_ = s.repo.UpdatePlan(planID, plan)
+	}
 	s.planner.Store().Update(planID, func(p *model.DiagnosisPlan) {
 		p.Status = model.PlanStatusCompleted
 		p.UpdatedAt = time.Now()
@@ -204,9 +287,8 @@ func (s *Server) handleAnalyzeDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 
 	user := currentUser(r)
 	s.recordAudit("user", user.Username, "diagnosis.plan.analyzed", "diagnosis_plan", planID, map[string]any{
-		"fault_type":       report.FaultType,
-		"confidence":       report.Confidence,
-		"incident_case_id": incidentCase.ID,
+		"fault_type": report.FaultType,
+		"confidence": report.Confidence,
 	})
 
 	writeJSON(w, http.StatusOK, report)
@@ -224,8 +306,16 @@ func (s *Server) syncPlanWithJobs(plan model.DiagnosisPlan) model.DiagnosisPlan 
 			continue
 		}
 
-		job, ok := s.store.GetJob(step.JobID)
-		if !ok {
+		var job model.Job
+		var jobOK bool
+		if s.repo != nil {
+			j, err := s.repo.GetJob(step.JobID)
+			if err == nil {
+				job = j
+				jobOK = true
+			}
+		}
+		if !jobOK {
 			allFinished = false
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"adp/internal/domain/model"
+	"adp/internal/infrastructure/db"
 )
 
 type dashboardSummaryResponse struct {
@@ -21,35 +22,52 @@ type dashboardSummaryResponse struct {
 }
 
 func (s *Server) handleDashboardSummary(w http.ResponseWriter, r *http.Request) {
-	jobs := s.store.ListJobs()
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
-	})
+	var (
+		jobs    []model.Job
+		workers []model.Worker
+		pending []model.Job
+		cases   []model.IncidentCase
+		logs    []model.AuditLog
+		metrics model.MetricsSnapshot
+	)
+
+	if s.repo != nil {
+		jobs, _ = s.repo.ListJobs(db.JobFilter{Limit: 8})
+		if jobs == nil {
+			jobs = []model.Job{}
+		}
+		workers, _ = s.repo.ListWorkers()
+		if workers == nil {
+			workers = []model.Worker{}
+		}
+		pending, _ = s.repo.ListPendingApprovalJobs()
+		if pending == nil {
+			pending = []model.Job{}
+		}
+		cases, _ = s.repo.ListIncidentCases(model.IncidentCaseFilter{Limit: 4})
+		if cases == nil {
+			cases = []model.IncidentCase{}
+		}
+		logs, _ = s.repo.ListAuditLogs("", "")
+		if logs == nil {
+			logs = []model.AuditLog{}
+		}
+		metrics, _ = s.repo.MetricsSnapshot()
+	}
+
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].CreatedAt.After(jobs[j].CreatedAt) })
+	sort.Slice(workers, func(i, j int) bool { return workers[i].UpdatedAt.After(workers[j].UpdatedAt) })
+	sort.Slice(pending, func(i, j int) bool { return pending[i].CreatedAt.After(pending[j].CreatedAt) })
+	sort.Slice(logs, func(i, j int) bool { return logs[i].CreatedAt.After(logs[j].CreatedAt) })
+
 	jobs = limitJobs(jobs, 8)
-
-	workers := s.store.ListWorkers()
-	sort.Slice(workers, func(i, j int) bool {
-		return workers[i].UpdatedAt.After(workers[j].UpdatedAt)
-	})
-
-	pending := s.store.ListPendingApprovalJobs()
-	sort.Slice(pending, func(i, j int) bool {
-		return pending[i].CreatedAt.After(pending[j].CreatedAt)
-	})
 	pending = limitJobs(pending, 6)
-
-	cases := s.store.ListIncidentCases(model.IncidentCaseFilter{Limit: 4})
-
-	logs := s.store.ListAuditLogs("", "")
-	sort.Slice(logs, func(i, j int) bool {
-		return logs[i].CreatedAt.After(logs[j].CreatedAt)
-	})
 	logs = limitAuditLogs(logs, 8)
 
 	writeJSON(w, http.StatusOK, dashboardSummaryResponse{
 		User:             currentUser(r),
 		CurrentTime:      time.Now().Format(time.RFC3339),
-		Metrics:          s.store.MetricsSnapshot(),
+		Metrics:          metrics,
 		RecentJobs:       jobs,
 		Workers:          workers,
 		PendingApprovals: pending,

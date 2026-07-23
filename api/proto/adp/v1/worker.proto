@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package adp.v1;
+
+option go_package = "adp/api/proto/adp/v1;adpv1";
+
+service WorkerService {
+  rpc Stream(stream WorkerEnvelope) returns (stream ServerEnvelope);
+}
+
+message WorkerEnvelope {
+  oneof payload {
+    RegisterRequest register = 1;
+    Heartbeat heartbeat = 2;
+    JobResult job_result = 3;
+    CommandAck command_ack = 4;
+  }
+}
+
+message ServerEnvelope {
+  oneof payload {
+    RegisterResponse registered = 1;
+    Job job = 2;
+    string command = 3;
+    string error = 4;
+  }
+}
+
+message RegisterRequest {
+  string name = 1;
+  string worker_type = 2;
+}
+
+message RegisterResponse {
+  string worker_id = 1;
+  string name = 2;
+  string worker_type = 3;
+}
+
+message Heartbeat {
+  string worker_id = 1;
+  HostInfo host_info = 2;
+}
+
+message HostInfo {
+  string hostname = 1;
+  string ip_address = 2;
+  double cpu_usage = 3;
+  double storage_usage = 4;
+}
+
+message Job {
+  string id = 1;
+  string name = 2;
+  string worker_type = 3;
+  string command = 4;
+  string template_code = 5;
+  map<string, string> parameters = 6;
+}
+
+message JobResult {
+  string worker_id = 1;
+  string job_id = 2;
+  string command = 3;
+  bool success = 4;
+  string output = 5;
+  bool log_to_db = 6;
+}
+
+message CommandAck {
+  string worker_id = 1;
+  string command = 2;
+  bool success = 3;
+}

@@ -33,7 +33,7 @@ Phase 1 的目标是把项目从“只有文档和目录骨架”推进到“可
 ### 1. 工程初始化
 
 - 创建 `go.mod`
-- 提供 `configs/app.env.example`
+- 提供 `configs/env/app.env.example`
 
 ### 2. 服务端能力
 

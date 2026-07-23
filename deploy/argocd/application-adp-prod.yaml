@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: adp-prod
+  namespace: argocd
+spec:
+  project: adp
+  source:
+    repoURL: git@gitee.com:YOUR_ORG/adp-gitops.git
+    targetRevision: main
+    path: deploy/k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: adp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

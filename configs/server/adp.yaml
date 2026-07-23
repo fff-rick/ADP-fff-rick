@@ -1,0 +1,20 @@
+addr: ":8080"
+
+worker:
+  grpc_addr: ":9090"
+
+db:
+  dsn: ""
+
+auth:
+  admin_username: "admin"
+  admin_password: "admin123"
+  secret: "adp-dev-secret"
+  worker_token: "adp-worker-secret"
+
+llm:
+  base_url: "https://api.deepseek.com"
+  api_key: ""
+  model: "deepseek-v4-pro"
+
+ai_context: "configs/ai/ai_context.yaml"

@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,11 +24,20 @@ Output ONLY valid JSON, no extra text:
 
 // Analyzer examines diagnosis results and produces an AnalysisReport.
 type Analyzer struct {
-	llmClient llm.Client
+	llmClient    llm.Client
+	systemPrompt string
 }
 
 func New(llmClient llm.Client) *Analyzer {
-	return &Analyzer{llmClient: llmClient}
+	return &Analyzer{llmClient: llmClient, systemPrompt: analysisSystemPrompt}
+}
+
+// SetSystemPrompt replaces the analyzer system prompt at runtime.
+func (a *Analyzer) SetSystemPrompt(prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt != "" {
+		a.systemPrompt = prompt
+	}
 }
 
 // Analyze takes a completed diagnosis plan and produces an analysis report.
@@ -57,18 +67,57 @@ func (a *Analyzer) analyzeWithLLM(ctx context.Context, plan model.DiagnosisPlan)
 	}
 
 	messages := []llm.Message{
-		{Role: "system", Content: analysisSystemPrompt},
+		{Role: "system", Content: a.systemPrompt},
 		{Role: "user", Content: summary.String()},
 	}
 
 	raw, err := a.llmClient.Chat(ctx, messages)
 	if err != nil {
-		return nil, fmt.Errorf("llm analysis failed: %w", err)
+		return a.analyzeWithRules(plan), nil
 	}
 
-	// Parse JSON response (simplified).
-	_ = raw
-	return a.analyzeWithRules(plan), nil
+	report, err := parseLLMReport(raw, plan.ID)
+	if err != nil {
+		return a.analyzeWithRules(plan), nil
+	}
+	return report, nil
+}
+
+func parseLLMReport(raw string, planID string) (*model.AnalysisReport, error) {
+	payload := extractJSON(raw)
+	var report model.AnalysisReport
+	if err := json.Unmarshal([]byte(payload), &report); err != nil {
+		return nil, fmt.Errorf("parse llm analysis: %w", err)
+	}
+	if strings.TrimSpace(report.FaultType) == "" {
+		return nil, fmt.Errorf("llm analysis missing fault_type")
+	}
+	if len(report.PossibleCauses) == 0 {
+		return nil, fmt.Errorf("llm analysis missing possible_causes")
+	}
+	if len(report.Suggestions) == 0 {
+		return nil, fmt.Errorf("llm analysis missing suggestions")
+	}
+	report.PlanID = planID
+	report.RawAnalysis = raw
+	report.CreatedAt = time.Now()
+	return &report, nil
+}
+
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimPrefix(s, "```")
+		s = strings.TrimSuffix(s, "```")
+		s = strings.TrimSpace(s)
+	}
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start != -1 && end > start {
+		return s[start : end+1]
+	}
+	return s
 }
 
 func (a *Analyzer) analyzeWithRules(plan model.DiagnosisPlan) *model.AnalysisReport {

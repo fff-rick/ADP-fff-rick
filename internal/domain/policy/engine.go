@@ -10,13 +10,15 @@ import (
 // Engine enforces execution policies: tool whitelist, template whitelist,
 // and risk-level based gating.
 type Engine struct {
-	allowedTools     map[string]bool
-	allowedTemplates map[string]bool
+	allowedTools       map[string]bool
+	allowedTemplates   map[string]bool
+	highRiskKeywords   []string
+	approvalRiskLevels map[model.RiskLevel]bool
 }
 
 // NewEngine creates a policy engine with a default whitelist.
 func NewEngine() *Engine {
-	return &Engine{
+	e := &Engine{
 		allowedTools: map[string]bool{
 			"mysqldump": true,
 			"curl":      true,
@@ -50,7 +52,44 @@ func NewEngine() *Engine {
 			"redis_slowlog_get": true,
 			"redis_client_list": true,
 		},
+		highRiskKeywords: []string{"delete", "drop", "restart", "reboot", "shutdown", "kill", "rm ", "mkfs", "dd "},
+		approvalRiskLevels: map[model.RiskLevel]bool{
+			model.RiskLevelMedium: true,
+			model.RiskLevelHigh:   true,
+		},
 	}
+	return e
+}
+
+// Configure replaces runtime policy settings from managed configuration.
+func (e *Engine) Configure(allowedTools, allowedTemplates, highRiskKeywords []string, approvalRiskLevels []model.RiskLevel) {
+	if len(allowedTools) > 0 {
+		e.allowedTools = stringSet(allowedTools)
+	}
+	if len(allowedTemplates) > 0 {
+		e.allowedTemplates = stringSet(allowedTemplates)
+	}
+	if len(highRiskKeywords) > 0 {
+		e.highRiskKeywords = highRiskKeywords
+	}
+	if len(approvalRiskLevels) > 0 {
+		e.approvalRiskLevels = make(map[model.RiskLevel]bool, len(approvalRiskLevels))
+		for _, level := range approvalRiskLevels {
+			e.approvalRiskLevels[level] = true
+		}
+	}
+}
+
+func stringSet(values []string) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result[value] = true
+	}
+	return result
 }
 
 // ValidateTemplate checks whether a template code is allowed.
@@ -83,9 +122,8 @@ func (e *Engine) AssessRisk(intent model.TaskIntent) model.RiskLevel {
 		return model.RiskLevelHigh
 	}
 
-	highRiskKeywords := []string{"delete", "drop", "restart", "reboot", "shutdown", "kill", "rm ", "mkfs", "dd "}
 	combined := intent.Intent + " " + intent.TargetType
-	for _, kw := range highRiskKeywords {
+	for _, kw := range e.highRiskKeywords {
 		if strings.Contains(strings.ToLower(combined), kw) {
 			return model.RiskLevelHigh
 		}
@@ -115,5 +153,5 @@ func (e *Engine) MergeRisk(levels ...model.RiskLevel) model.RiskLevel {
 }
 
 func (e *Engine) RequiresManualApproval(level model.RiskLevel) bool {
-	return level == model.RiskLevelMedium || level == model.RiskLevelHigh
+	return e.approvalRiskLevels[level]
 }

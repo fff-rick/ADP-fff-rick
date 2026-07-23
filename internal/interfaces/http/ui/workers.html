@@ -18,7 +18,9 @@
 
       <div class="topbar-right">
         <span class="server-clock" id="clock">--:--:--</span>
+        <a href="/login" class="btn btn-xs btn-primary" id="login-nav-btn" style="display:none;">登录</a>
         <span class="session-badge" id="session-state">未登录</span>
+        <button id="logout-button" class="btn btn-xs btn-ghost" style="display:none;">退出</button>
         <button class="theme-toggle" id="theme-toggle" type="button" title="切换主题">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
@@ -29,8 +31,7 @@
 
     <nav class="nav" style="margin-bottom: 28px;">
       <a class="nav-link" href="/">首页</a>
-      <a class="nav-link" href="/login">登录</a>
-      <a class="nav-link" href="/users">用户</a>
+            <a class="nav-link" href="/users">用户</a>
       <a class="nav-link is-active" href="/workers">Workers</a>
       <a class="nav-link" href="/jobs">Jobs</a>
       <a class="nav-link" href="/tasks">Tasks</a>
@@ -54,7 +55,40 @@
                 <label class="field-label" for="worker-type">类型</label>
                 <input class="field-input" id="worker-type" name="worker-type" type="text" value="shell" placeholder="例如：shell">
               </div>
-              <button class="btn btn-primary" type="submit">创建 Worker</button>
+
+              <!-- 部署模式切换 -->
+              <div style="display: flex; gap: 10px; margin-bottom: 4px;">
+                <button type="button" class="btn btn-xs btn-primary" id="deploy-mode-local" onclick="switchDeployMode('local')" style="flex:1;">本地注册</button>
+                <button type="button" class="btn btn-xs btn-ghost" id="deploy-mode-remote" onclick="switchDeployMode('remote')" style="flex:1;">远程部署</button>
+              </div>
+
+              <!-- 远程部署参数 (默认隐藏) -->
+              <div id="remote-deploy-fields" style="display: none;">
+                <div class="field-group">
+                  <label class="field-label" for="ssh-host">目标主机 IP</label>
+                  <input class="field-input" id="ssh-host" name="ssh-host" type="text" placeholder="192.168.1.100">
+                </div>
+                <div class="two-up">
+                  <div class="field-group">
+                    <label class="field-label" for="ssh-port">SSH 端口</label>
+                    <input class="field-input" id="ssh-port" name="ssh-port" type="text" value="22" placeholder="22">
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="ssh-user">SSH 用户</label>
+                    <input class="field-input" id="ssh-user" name="ssh-user" type="text" placeholder="root">
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label" for="ssh-password">SSH 密码</label>
+                  <input class="field-input" id="ssh-password" name="ssh-password" type="password" placeholder="输入 SSH 密码">
+                </div>
+                <div class="field-group" style="display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" id="worker-log-to-db" name="worker-log-to-db" style="width: 16px; height: 16px;">
+                  <label for="worker-log-to-db" style="font-size: 0.8125rem; cursor: pointer;">Worker 日志落库</label>
+                </div>
+              </div>
+
+              <button class="btn btn-primary" type="submit" id="worker-submit-btn">创建 Worker</button>
             </form>
           </div>
         </div>

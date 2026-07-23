@@ -15,7 +15,7 @@ func TestUserWorkerAndTaskManagementEndpoints(t *testing.T) {
 		AdminPassword:     "admin123",
 		AuthSecret:        "secret",
 		WorkerSharedToken: "worker-secret",
-	})
+	}, nil, nil)
 	app := httptest.NewServer(server.httpServer.Handler)
 	defer app.Close()
 
@@ -75,6 +75,9 @@ func TestUserWorkerAndTaskManagementEndpoints(t *testing.T) {
 	}, &taskRun)
 	if status != http.StatusCreated && status != http.StatusAccepted {
 		t.Fatalf("task run status = %d, want 201 or 202", status)
+	}
+	if taskRun.Job.Parameters["Database"] != "demo" || taskRun.Job.Parameters["Password"] != "secret" {
+		t.Fatalf("expected task parameters to be persisted, got %+v", taskRun.Job.Parameters)
 	}
 
 	taskJobs := []model.Job{}

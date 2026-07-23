@@ -1,10 +1,12 @@
 package api
 
 import (
-	"adp/internal/domain/model"
 	"context"
 	"errors"
 	"net/http"
+	"strings"
+
+	"adp/internal/domain/model"
 )
 
 type contextKey string
@@ -27,6 +29,10 @@ type createUserRequest struct {
 	Role     string `json:"role"`
 }
 
+type changePasswordRequest struct {
+	NewPassword string `json:"new_password"`
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -40,10 +46,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, loginResponse{
-		Token: token,
-		User:  user,
-	})
+	writeJSON(w, http.StatusOK, loginResponse{Token: token, User: user})
 }
 
 func (s *Server) withUserAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -102,4 +105,75 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, user)
+}
+
+// handleDeleteUser deletes a user. Admin only; cannot delete self.
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if currentUser(r).Role != "admin" {
+		writeError(w, http.StatusForbidden, errors.New("admin role required"))
+		return
+	}
+
+	username := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+	if username == "" {
+		writeError(w, http.StatusBadRequest, errors.New("username is required"))
+		return
+	}
+
+	// Parse path: /api/v1/users/{username} or /api/v1/users/{username}/password
+	username = strings.Split(username, "/")[0]
+
+	if username == currentUser(r).Username {
+		writeError(w, http.StatusBadRequest, errors.New("cannot delete yourself"))
+		return
+	}
+
+	if err := s.authService.DeleteUser(username); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	actor := currentUser(r)
+	s.recordAudit("user", actor.Username, "user.deleted", "user", username, nil)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleChangePassword changes a user's password.
+// Path: PUT /api/v1/users/{username}/password
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[1] != "password" {
+		writeError(w, http.StatusNotFound, errors.New("route not found"))
+		return
+	}
+
+	username := parts[0]
+	actor := currentUser(r)
+
+	// Only admin or the user themselves can change password.
+	if actor.Role != "admin" && actor.Username != username {
+		writeError(w, http.StatusForbidden, errors.New("cannot change another user's password"))
+		return
+	}
+
+	var req changePasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if req.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, errors.New("new_password is required"))
+		return
+	}
+
+	if err := s.authService.ChangePassword(username, req.NewPassword); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	s.recordAudit("user", actor.Username, "user.password_changed", "user", username, nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password updated"})
 }

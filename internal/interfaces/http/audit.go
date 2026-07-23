@@ -1,16 +1,39 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+
+	"adp/internal/domain/model"
+)
 
 func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	resourceType := r.URL.Query().Get("resource_type")
 	resourceID := r.URL.Query().Get("resource_id")
-	writeJSON(w, http.StatusOK, s.store.ListAuditLogs(resourceType, resourceID))
+
+	if s.repo != nil {
+		logs, err := s.repo.ListAuditLogs(resourceType, resourceID)
+		if err == nil {
+			writeJSON(w, http.StatusOK, logs)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []model.AuditLog{})
 }
 
 func (s *Server) recordAudit(actorType, actorID, action, resourceType, resourceID string, details map[string]any) {
-	s.store.AddAuditLog(actorType, actorID, action, resourceType, resourceID, details)
-
+	entry := model.AuditLog{
+		ActorType:    actorType,
+		ActorID:      actorID,
+		Action:       action,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Details:      details,
+		CreatedAt:    time.Now(),
+	}
+	if s.repo != nil {
+		_ = s.repo.AddAuditLog(entry)
+	}
 	fields := map[string]any{
 		"actor_id":      actorID,
 		"actor_type":    actorType,

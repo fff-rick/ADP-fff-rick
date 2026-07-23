@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: adp
+  namespace: argocd
+spec:
+  description: ADP production project
+  sourceRepos:
+    - "*"
+  destinations:
+    - namespace: adp
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: ""
+      kind: PersistentVolume
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

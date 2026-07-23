@@ -16,7 +16,12 @@ func (s *Server) handleListIncidentCases(w http.ResponseWriter, r *http.Request)
 		Limit:       parsePositiveInt(r.URL.Query().Get("limit")),
 	}
 
-	writeJSON(w, http.StatusOK, s.store.ListIncidentCases(filter))
+	if s.repo != nil {
+		cases, _ := s.repo.ListIncidentCases(filter)
+		writeJSON(w, http.StatusOK, cases)
+		return
+	}
+	writeJSON(w, http.StatusOK, []model.IncidentCase{})
 }
 
 func (s *Server) handleSuggestIncidentCases(w http.ResponseWriter, r *http.Request) {
@@ -28,10 +33,17 @@ func (s *Server) handleSuggestIncidentCases(w http.ResponseWriter, r *http.Reque
 		limit = 3
 	}
 
-	cases := s.store.FindSimilarIncidentCases(description, triggerType, faultType, limit)
+	if s.repo != nil {
+		cases, _ := s.repo.FindSimilarIncidentCases(description, triggerType, faultType, limit)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"reference_cases":  cases,
+			"historical_hints": buildHistoricalHints(cases),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"reference_cases":  cases,
-		"historical_hints": buildHistoricalHints(cases),
+		"reference_cases":  []model.IncidentCase{},
+		"historical_hints": []string{},
 	})
 }
 

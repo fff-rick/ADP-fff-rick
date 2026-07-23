@@ -54,8 +54,8 @@ func TestApprovalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApproveJob() error = %v", err)
 	}
-	if approved.Status != model.JobStatusQueued {
-		t.Fatalf("approved status = %s, want queued", approved.Status)
+	if approved.Status != model.JobStatusPending {
+		t.Fatalf("approved status = %s, want pending", approved.Status)
 	}
 	if approved.ApprovalStatus != model.ApprovalStatusApproved {
 		t.Fatalf("approval status = %s, want approved", approved.ApprovalStatus)

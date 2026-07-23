@@ -39,10 +39,13 @@ Available templates for steps:
 - http_health_check: parameters URL, Timeout`
 
 // predefinedPlans maps trigger types to diagnosis step sequences.
-var predefinedPlans = map[string]struct {
-	Title string
-	Steps []model.DiagnosisStep
-}{
+type PlanDefinition struct {
+	Title    string
+	Keywords []string
+	Steps    []model.DiagnosisStep
+}
+
+var predefinedPlans = map[string]PlanDefinition{
 	"nginx_unreachable": {
 		Title: "Nginx 不可访问诊断",
 		Steps: []model.DiagnosisStep{
@@ -157,16 +160,18 @@ func (s *PlanStore) Update(id string, fn func(plan *model.DiagnosisPlan)) (model
 
 // Planner generates diagnosis plans from fault descriptions.
 type Planner struct {
-	llmClient llm.Client
-	templates *template.Engine
-	store     *PlanStore
+	llmClient   llm.Client
+	templates   *template.Engine
+	store       *PlanStore
+	customPlans map[string]PlanDefinition
 }
 
 func New(llmClient llm.Client, templates *template.Engine, store *PlanStore) *Planner {
 	return &Planner{
-		llmClient: llmClient,
-		templates: templates,
-		store:     store,
+		llmClient:   llmClient,
+		templates:   templates,
+		store:       store,
+		customPlans: make(map[string]PlanDefinition),
 	}
 }
 
@@ -183,7 +188,18 @@ func (p *Planner) GeneratePlan(ctx context.Context, description string) (*model.
 	}
 
 	triggerType := classifyTrigger(description)
-	predefined, ok := predefinedPlans[triggerType]
+	predefined, ok := p.customPlans[triggerType]
+	if !ok {
+		customTriggerType, customDefinition, customOK := p.matchCustomPlan(description)
+		if customOK {
+			triggerType = customTriggerType
+			predefined = customDefinition
+			ok = true
+		}
+	}
+	if !ok {
+		predefined, ok = predefinedPlans[triggerType]
+	}
 
 	if ok {
 		return p.buildFromPredefined(description, triggerType, predefined), nil
@@ -196,10 +212,19 @@ func (p *Planner) GeneratePlan(ctx context.Context, description string) (*model.
 	return nil, fmt.Errorf("no predefined plan for trigger type: %s (and LLM not configured)", triggerType)
 }
 
-func (p *Planner) buildFromPredefined(description, triggerType string, predef struct {
-	Title string
-	Steps []model.DiagnosisStep
-}) *model.DiagnosisPlan {
+func (p *Planner) matchCustomPlan(description string) (string, PlanDefinition, bool) {
+	lower := strings.ToLower(description)
+	for triggerType, definition := range p.customPlans {
+		for _, keyword := range definition.Keywords {
+			if keyword != "" && strings.Contains(lower, strings.ToLower(keyword)) {
+				return triggerType, definition, true
+			}
+		}
+	}
+	return "", PlanDefinition{}, false
+}
+
+func (p *Planner) buildFromPredefined(description, triggerType string, predef PlanDefinition) *model.DiagnosisPlan {
 	now := time.Now()
 	steps := make([]model.DiagnosisStep, len(predef.Steps))
 	copy(steps, predef.Steps)
@@ -218,6 +243,15 @@ func (p *Planner) buildFromPredefined(description, triggerType string, predef st
 	}
 	plan = p.store.Save(plan)
 	return &plan
+}
+
+// RegisterPlanDefinition registers or replaces a runtime diagnosis plan definition.
+func (p *Planner) RegisterPlanDefinition(triggerType string, definition PlanDefinition) {
+	triggerType = strings.TrimSpace(triggerType)
+	if triggerType == "" {
+		return
+	}
+	p.customPlans[triggerType] = definition
 }
 
 func (p *Planner) buildFromLLM(ctx context.Context, description string) (*model.DiagnosisPlan, error) {

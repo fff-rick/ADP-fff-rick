@@ -13,11 +13,15 @@ import (
 	"adp/internal/application/analyzer"
 	"adp/internal/application/parser"
 	"adp/internal/application/planner"
+	"adp/internal/config"
 	"adp/internal/domain/policy"
 	"adp/internal/domain/template"
 	"adp/internal/infrastructure/auth"
+	"adp/internal/infrastructure/db"
 	"adp/internal/infrastructure/llm"
-	"adp/internal/infrastructure/scheduler"
+	"adp/internal/infrastructure/workerstream"
+	"adp/internal/module"
+	"adp/internal/module/builtin"
 )
 
 type Config struct {
@@ -29,22 +33,41 @@ type Config struct {
 	LLMBaseURL        string
 	LLMAPIKey         string
 	LLMModel          string
+	AIContextPath     string
 }
+
+// HasLLM returns true if an LLM is configured.
+func (c Config) HasLLM() bool { return c.LLMBaseURL != "" }
 
 type Server struct {
-	config      Config
-	authService *auth.Service
-	store       *scheduler.Store
-	templateEng *template.Engine
-	policyEng   *policy.Engine
-	taskParser  *parser.Parser
-	planner     *planner.Planner
-	analyzer    *analyzer.Analyzer
-	httpServer  *http.Server
+	config        Config
+	repo          db.Repository
+	authService   *auth.Service
+	templateEng   *template.Engine
+	policyEng     *policy.Engine
+	moduleReg     *module.Registry
+	workerHub     *workerstream.Hub
+	taskParser    *parser.Parser
+	planner       *planner.Planner
+	analyzer      *analyzer.Analyzer
+	aiContext     *config.AIContext
+	systemPrompts map[string]string
+	httpServer    *http.Server
 }
 
-func NewServer(cfg Config) *Server {
+// NewServer creates a new ADP server.
+// If repo is nil, an in-memory fallback is used.
+// If authSvc is nil, a default auth service is created from the config.
+func NewServer(cfg Config, repo db.Repository, authSvc *auth.Service) *Server {
+	if repo == nil {
+		repo = db.NewMemoryRepository()
+	}
+	moduleReg := builtin.NewRegistry()
 	templateEng := template.NewEngine()
+	// Sync module registry templates into the template engine for backward compat.
+	for _, m := range moduleReg.List() {
+		templateEng.RegisterModule(m)
+	}
 	policyEng := policy.NewEngine()
 
 	var llmClient llm.Client
@@ -57,18 +80,44 @@ func NewServer(cfg Config) *Server {
 	dPlanner := planner.New(llmClient, templateEng, planStore)
 	dAnalyzer := analyzer.New(llmClient)
 
+	if authSvc == nil {
+		authSvc = auth.NewService(cfg.AdminUsername, cfg.AdminPassword, cfg.AuthSecret)
+	}
+
+	// Load AI context if configured.
+	var aiCtx *config.AIContext
+	if cfg.AIContextPath != "" {
+		loaded, err := config.LoadAIContext(cfg.AIContextPath)
+		if err != nil {
+			log.Printf("WARNING: failed to load AI context from %s: %v", cfg.AIContextPath, err)
+		} else {
+			aiCtx = loaded
+			taskParser.SetAIContext(aiCtx)
+			log.Printf("loaded AI context from %s", cfg.AIContextPath)
+		}
+	}
+
 	server := &Server{
-		config:      cfg,
-		authService: auth.NewService(cfg.AdminUsername, cfg.AdminPassword, cfg.AuthSecret),
-		store:       scheduler.NewStore(),
-		templateEng: templateEng,
-		policyEng:   policyEng,
-		taskParser:  taskParser,
-		planner:     dPlanner,
-		analyzer:    dAnalyzer,
+		config:        cfg,
+		repo:          repo,
+		authService:   authSvc,
+		templateEng:   templateEng,
+		policyEng:     policyEng,
+		moduleReg:     moduleReg,
+		workerHub:     workerstream.NewHub(),
+		aiContext:     aiCtx,
+		taskParser:    taskParser,
+		planner:       dPlanner,
+		analyzer:      dAnalyzer,
+		systemPrompts: make(map[string]string),
+	}
+
+	if err := server.reloadManagedConfigs(); err != nil {
+		log.Printf("WARNING: failed to load managed configs: %v", err)
 	}
 
 	mux := http.NewServeMux()
+	// UI pages
 	mux.HandleFunc("GET /", server.handleDashboardPage)
 	mux.HandleFunc("GET /login", server.handleDashboardPage)
 	mux.HandleFunc("GET /users", server.handleDashboardPage)
@@ -76,31 +125,66 @@ func NewServer(cfg Config) *Server {
 	mux.HandleFunc("GET /jobs", server.handleDashboardPage)
 	mux.HandleFunc("GET /tasks", server.handleDashboardPage)
 	mux.Handle("GET /static/", server.staticAssetsHandler())
+	// Health & metrics
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)
+	// Auth
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
+	// Users
 	mux.HandleFunc("GET /api/v1/users", server.withUserAuth(server.handleListUsers))
 	mux.HandleFunc("POST /api/v1/users", server.withUserAuth(server.handleCreateUser))
+	mux.HandleFunc("DELETE /api/v1/users/", server.withUserAuth(server.handleDeleteUser))
+	mux.HandleFunc("PUT /api/v1/users/", server.withUserAuth(server.handleChangePassword))
+	// Dashboard
 	mux.HandleFunc("GET /api/v1/dashboard/summary", server.withUserAuth(server.handleDashboardSummary))
+	// Jobs
 	mux.HandleFunc("POST /api/v1/jobs", server.withUserAuth(server.handleCreateJob))
 	mux.HandleFunc("GET /api/v1/jobs", server.withUserAuth(server.handleListJobs))
-	mux.HandleFunc("GET /api/v1/jobs/", server.withUserAuth(server.handleGetJob))
+	mux.HandleFunc("GET /api/v1/jobs/", server.withUserAuth(server.handleJobActions))
+	mux.HandleFunc("POST /api/v1/jobs/", server.withUserAuth(server.handleJobActions))
+	mux.HandleFunc("DELETE /api/v1/jobs/", server.withUserAuth(server.handleJobActions))
+	mux.HandleFunc("POST /api/v1/jobs/yaml", server.withUserAuth(server.handleCreateJobFromYAML))
+	// Workers
 	mux.HandleFunc("POST /api/v1/workers", server.withUserAuth(server.handleCreateWorker))
 	mux.HandleFunc("GET /api/v1/workers", server.withUserAuth(server.handleListWorkers))
+	// Stop/restart/delete — user-authenticated (operator action).
+	mux.HandleFunc("POST /api/v1/workers/{id}/stop", server.withUserAuth(server.handleWorkerUserAction))
+	mux.HandleFunc("POST /api/v1/workers/{id}/restart", server.withUserAuth(server.handleWorkerUserAction))
+	mux.HandleFunc("DELETE /api/v1/workers/{id}", server.withUserAuth(server.handleWorkerUserAction))
+	// Worker self-service — worker-authenticated.
 	mux.HandleFunc("POST /api/v1/workers/register", server.withWorkerAuth(server.handleRegisterWorker))
 	mux.HandleFunc("POST /api/v1/workers/", server.withWorkerAuth(server.handleWorkerActions))
+	mux.HandleFunc("PUT /api/v1/workers/", server.withWorkerAuth(server.handleWorkerActions))
+	// Templates & tasks
 	mux.HandleFunc("GET /api/v1/templates", server.withUserAuth(server.handleListTemplates))
 	mux.HandleFunc("GET /api/v1/tasks", server.withUserAuth(server.handleListTaskJobs))
 	mux.HandleFunc("POST /api/v1/tasks/parse", server.withUserAuth(server.handleParseTask))
 	mux.HandleFunc("POST /api/v1/tasks/run", server.withUserAuth(server.handleRunTask))
+	// Approvals
 	mux.HandleFunc("GET /api/v1/approvals/jobs", server.withUserAuth(server.handleListPendingApprovalJobs))
 	mux.HandleFunc("POST /api/v1/approvals/jobs/", server.withUserAuth(server.handleApproveJob))
+	// Audit
 	mux.HandleFunc("GET /api/v1/audit/logs", server.withUserAuth(server.handleListAuditLogs))
+	// Cases
 	mux.HandleFunc("GET /api/v1/cases", server.withUserAuth(server.handleListIncidentCases))
 	mux.HandleFunc("GET /api/v1/cases/suggestions", server.withUserAuth(server.handleSuggestIncidentCases))
+	// Diagnosis
 	mux.HandleFunc("POST /api/v1/diagnosis/plan", server.withUserAuth(server.handleCreateDiagnosisPlan))
 	mux.HandleFunc("GET /api/v1/diagnosis/plan/", server.withUserAuth(server.handleDiagnosisPlanActions))
 	mux.HandleFunc("POST /api/v1/diagnosis/plan/", server.withUserAuth(server.handleDiagnosisPlanActions))
+	// YAML generation & storage
+	mux.HandleFunc("POST /api/v1/tasks/generate-yaml", server.withUserAuth(server.handleGenerateYAML))
+	mux.HandleFunc("POST /api/v1/yamls", server.withUserAuth(server.handleSaveYAML))
+	mux.HandleFunc("GET /api/v1/yamls", server.withUserAuth(server.handleListYAMLs))
+	mux.HandleFunc("POST /api/v1/yamls/", server.withUserAuth(server.handleYAMLActions))
+	mux.HandleFunc("DELETE /api/v1/yamls/", server.withUserAuth(server.handleYAMLActions))
+	// Runtime managed configs: templates, policies, prompts, diagnosis plans.
+	mux.HandleFunc("GET /api/v1/configs/", server.withUserAuth(server.handleManagedConfigActions))
+	mux.HandleFunc("POST /api/v1/configs/", server.withUserAuth(server.handleManagedConfigActions))
+	mux.HandleFunc("PUT /api/v1/configs/", server.withUserAuth(server.handleManagedConfigActions))
+	mux.HandleFunc("DELETE /api/v1/configs/", server.withUserAuth(server.handleManagedConfigActions))
+	// Worker logs (worker auth)
+	mux.HandleFunc("POST /api/v1/job-logs", server.withWorkerAuth(server.handleAddWorkerLog))
 
 	server.httpServer = &http.Server{
 		Addr:              cfg.Addr,
@@ -123,11 +207,34 @@ func (s *Server) Handler() http.Handler {
 	return s.httpServer.Handler
 }
 
-func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "ok",
-	})
+func (s *Server) Repository() db.Repository {
+	return s.repo
 }
+
+func (s *Server) WorkerHub() *workerstream.Hub {
+	return s.workerHub
+}
+
+// ── Generic handlers ──
+
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleJobActions(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.Method == http.MethodGet:
+		s.handleGetJob(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/dispatch"):
+		s.handleDispatchJob(w, r)
+	case r.Method == http.MethodDelete:
+		s.handleDeleteJob(w, r)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("unsupported method"))
+	}
+}
+
+// ── Helpers ──
 
 func bearerToken(header string) string {
 	if !strings.HasPrefix(header, "Bearer ") {
@@ -138,7 +245,6 @@ func bearerToken(header string) string {
 
 func decodeJSON(r *http.Request, target any) error {
 	defer r.Body.Close() //nolint:errcheck
-
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
@@ -151,9 +257,18 @@ func writeJSON(w http.ResponseWriter, statusCode int, value any) {
 }
 
 func writeError(w http.ResponseWriter, statusCode int, err error) {
-	writeJSON(w, statusCode, map[string]string{
-		"error": err.Error(),
-	})
+	writeJSON(w, statusCode, map[string]string{"error": err.Error()})
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Server) String() string {
@@ -166,7 +281,6 @@ func logEvent(component, action string, fields map[string]any) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-
 	var parts []string
 	parts = append(parts, "level=INFO")
 	parts = append(parts, fmt.Sprintf("component=%s", component))
@@ -174,6 +288,5 @@ func logEvent(component, action string, fields map[string]any) {
 	for _, key := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%v", key, fields[key]))
 	}
-
 	log.Print(strings.Join(parts, " "))
 }

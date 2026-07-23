@@ -17,7 +17,7 @@ func TestTaskApprovalFlow(t *testing.T) {
 		AdminPassword:     "admin123",
 		AuthSecret:        "secret",
 		WorkerSharedToken: "worker-secret",
-	})
+	}, nil, nil)
 	app := httptest.NewServer(server.httpServer.Handler)
 	defer app.Close()
 
@@ -64,8 +64,8 @@ func TestTaskApprovalFlow(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("approval status = %d, want %d", status, http.StatusOK)
 	}
-	if approvalResp.Status != model.JobStatusQueued {
-		t.Fatalf("approved job status = %s, want queued", approvalResp.Status)
+	if approvalResp.Status != model.JobStatusPending {
+		t.Fatalf("approved job status = %s, want pending", approvalResp.Status)
 	}
 
 	worker := model.Worker{}
@@ -84,8 +84,8 @@ func TestTaskApprovalFlow(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("worker poll status = %d, want %d", status, http.StatusOK)
 	}
-	if pollResp.Job == nil || pollResp.Job.ID != runResp.Job.ID {
-		t.Fatalf("expected approved job to be polled, got %+v", pollResp.Job)
+	if pollResp.Job != nil {
+		t.Fatalf("expected worker poll not to auto-assign jobs, got %+v", pollResp.Job)
 	}
 
 	var auditLogs []model.AuditLog
@@ -93,8 +93,8 @@ func TestTaskApprovalFlow(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("audit logs status = %d, want %d", status, http.StatusOK)
 	}
-	if len(auditLogs) < 3 {
-		t.Fatalf("expected at least 3 audit logs, got %d", len(auditLogs))
+	if len(auditLogs) < 2 {
+		t.Fatalf("expected at least 2 audit logs, got %d", len(auditLogs))
 	}
 }
 
