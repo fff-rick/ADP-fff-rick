@@ -5,10 +5,10 @@
 ## 1. 推荐链路
 
 ```text
-源码仓库 -> CI 测试和构建 Server 镜像 -> GitHub Packages/GHCR -> 国内 GitOps 仓库 -> Argo CD -> kubeadm 集群
+源码仓库 -> CI 测试和构建 Server 镜像 -> GitHub Packages/GHCR -> 更新当前仓库部署清单 -> Argo CD -> kubeadm 集群
 ```
 
-生产环境不建议让 CI 直接 SSH 到服务器执行 `kubectl apply`。CI 只负责构建镜像并更新 GitOps 仓库；集群里的 Argo CD 从 GitOps 仓库拉取期望状态并同步。
+生产环境不建议让 CI 直接 SSH 到服务器执行 `kubectl apply`。CI 只负责构建镜像并更新当前仓库中的部署清单；集群里的 Argo CD 从 Git 拉取期望状态并同步。
 
 ## 2. 准备 GitHub Packages 镜像仓库
 
@@ -27,37 +27,27 @@ Settings -> Actions -> General -> Workflow permissions -> Read and write permiss
 
 ## 3. 解决服务器访问 GitHub 受限
 
-不要让 Argo CD 直接拉 GitHub。建议新建一个国内 GitOps 仓库，例如 Gitee、CODING，或者腾讯云 CVM 上自建 GitLab。
-
-推荐：
+当前远程服务器已经给 `argocd-repo-server` 配置了宿主机代理，因此 Argo CD 可以直接拉当前 GitHub 仓库。当前流程：
 
 ```text
 GitHub 源码仓库
   -> GitHub Actions 构建 Server 镜像
   -> 推送 Server 镜像到 ghcr.io
-  -> 推送 deploy/k8s 到 Gitee/CODING GitOps 仓库
-  -> Argo CD 从 Gitee/CODING 拉取
+  -> GitHub Actions 更新 deploy/k8s/overlays/prod/kustomization.yaml
+  -> Argo CD 从当前 GitHub 仓库拉取并同步
 ```
 
-如果腾讯云服务器拉取 `ghcr.io` 不稳定，可以先用 GitHub Packages 作为标准源，再在服务器侧配置代理，或做一层国内镜像同步。GitOps 仓库仍建议放 Gitee/CODING/自建 GitLab，避免 Argo CD 直接依赖 GitHub。
+如果后续 GitHub 访问仍然不稳定，再考虑把 GitOps 仓库迁到 Gitee/CODING/自建 GitLab。
 
-## 4. 准备 GitOps 仓库
+## 4. CI 权限
 
-把本仓库的这些目录复制到 GitOps 仓库：
+GitHub Actions 需要能推送 GHCR package，并能把新镜像 tag 提交回当前仓库：
 
 ```text
-deploy/k8s/
-deploy/argocd/
+Settings -> Actions -> General -> Workflow permissions -> Read and write permissions
 ```
 
-然后把 `deploy/argocd/application-adp-prod.yaml` 中的 `repoURL` 改成你的国内 GitOps 仓库地址。
-
-CI 需要配置：
-
-```text
-vars.GITOPS_REPO_SSH=git@gitee.com:YOUR_ORG/adp-gitops.git
-secrets.GITOPS_SSH_KEY=<can push to GitOps repo>
-```
+当前 workflow 不需要配置 `GITOPS_REPO_SSH` 或 `GITOPS_SSH_KEY`。
 
 ## 5. 在集群创建真实 Secret
 
