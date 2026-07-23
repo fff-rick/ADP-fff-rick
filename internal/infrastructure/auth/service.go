@@ -12,8 +12,20 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"adp/internal/domain/model"
 )
+
+// UserStore defines the persistence interface for user operations.
+// Implemented by db.Repository for PostgreSQL and by the in-memory fallback.
+type UserStore interface {
+	CreateUser(username, passwordHash, role string) (model.User, error)
+	GetUser(username string) (passwordHash string, user model.User, found bool, err error)
+	ListUsers() ([]model.User, error)
+	DeleteUser(username string) error
+	UpdatePassword(username, newHash string) error
+}
 
 type Service struct {
 	adminUsername string
@@ -21,12 +33,16 @@ type Service struct {
 	secret        []byte
 	mu            sync.RWMutex
 	users         map[string]storedUser
+	userStore     UserStore // optional: database-backed user store
 }
 
 type storedUser struct {
 	password string
 	user     model.User
 }
+
+func (s storedUser) GetPassword() string { return s.password }
+func (s storedUser) GetUser() model.User { return s.user }
 
 type Claims struct {
 	Subject string `json:"sub"`
@@ -41,8 +57,15 @@ func NewService(adminUsername, adminPassword, secret string) *Service {
 		secret:        []byte(secret),
 		users:         make(map[string]storedUser),
 	}
+
+	// Seed admin user with bcrypt hash.
+	hash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	passwordHash := adminPassword
+	if err == nil {
+		passwordHash = string(hash)
+	}
 	svc.users[adminUsername] = storedUser{
-		password: adminPassword,
+		password: passwordHash,
 		user: model.User{
 			Username: adminUsername,
 			Role:     "admin",
@@ -51,24 +74,78 @@ func NewService(adminUsername, adminPassword, secret string) *Service {
 	return svc
 }
 
+// SetUserStore sets an optional database-backed user store.
+// When set, all user operations delegate to the store in addition to in-memory.
+func (s *Service) SetUserStore(store UserStore) {
+	s.userStore = store
+}
+
+// SeedUserStore syncs the in-memory admin user to the database.
+func (s *Service) SeedUserStore() error {
+	if s.userStore == nil {
+		return nil
+	}
+
+	_, _, found, err := s.userStore.GetUser(s.adminUsername)
+	if err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+
+	_, err = s.userStore.CreateUser(s.adminUsername, s.users[s.adminUsername].password, "admin")
+	return err
+}
+
 func (s *Service) Login(username, password string) (string, model.User, error) {
+	// Try database first if available.
+	if s.userStore != nil {
+		passwordHash, user, found, err := s.userStore.GetUser(username)
+		if err != nil {
+			return "", model.User{}, fmt.Errorf("login: %w", err)
+		}
+		if found {
+			if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+				// Fallback: try plaintext comparison for migrated users.
+				if password != passwordHash {
+					return "", model.User{}, errors.New("invalid username or password")
+				}
+			}
+			return s.generateToken(user)
+		}
+	}
+
+	// Fall back to in-memory.
 	s.mu.RLock()
 	record, ok := s.users[username]
 	s.mu.RUnlock()
-	if !ok || password != record.password {
-		return "", model.User{}, errors.New("invalid username or password")
+
+	// Try bcrypt compare first, then fall back to plaintext for backward compat.
+	if ok {
+		if bcrypt.CompareHashAndPassword([]byte(record.password), []byte(password)) == nil {
+			return s.generateToken(record.user)
+		}
 	}
 
+	// Plaintext comparison for backward compatibility.
+	if ok && password == record.password {
+		return s.generateToken(record.user)
+	}
+
+	return "", model.User{}, errors.New("invalid username or password")
+}
+
+func (s *Service) generateToken(user model.User) (string, model.User, error) {
 	token, err := s.sign(Claims{
-		Subject: record.user.Username,
-		Role:    record.user.Role,
+		Subject: user.Username,
+		Role:    user.Role,
 		Expiry:  time.Now().Add(12 * time.Hour).Unix(),
 	})
 	if err != nil {
 		return "", model.User{}, err
 	}
-
-	return token, record.user, nil
+	return token, user, nil
 }
 
 func (s *Service) CreateUser(username, password, role string) (model.User, error) {
@@ -85,25 +162,48 @@ func (s *Service) CreateUser(username, password, role string) (model.User, error
 		return model.User{}, errors.New("role must be admin or operator")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.users[username]; exists {
-		return model.User{}, errors.New("user already exists")
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return model.User{}, fmt.Errorf("hash password: %w", err)
 	}
+	passwordHash := string(hash)
 
 	user := model.User{
 		Username: username,
 		Role:     role,
 	}
+
+	// Persist to database if available.
+	if s.userStore != nil {
+		if _, err := s.userStore.CreateUser(username, passwordHash, role); err != nil {
+			return model.User{}, err
+		}
+	}
+
+	// Also keep in-memory.
+	s.mu.Lock()
+	if _, exists := s.users[username]; exists {
+		s.mu.Unlock()
+		return model.User{}, errors.New("user already exists")
+	}
 	s.users[username] = storedUser{
-		password: password,
+		password: passwordHash,
 		user:     user,
 	}
+	s.mu.Unlock()
 
 	return user, nil
 }
 
 func (s *Service) ListUsers() []model.User {
+	// Use database if available.
+	if s.userStore != nil {
+		users, err := s.userStore.ListUsers()
+		if err == nil {
+			return users
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -115,6 +215,66 @@ func (s *Service) ListUsers() []model.User {
 		return users[i].Username < users[j].Username
 	})
 	return users
+}
+
+// DeleteUser removes a user. Only admin can perform this action.
+func (s *Service) DeleteUser(username string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	if username == s.adminUsername {
+		return errors.New("cannot delete the initial admin user")
+	}
+
+	// Delete from database if available.
+	if s.userStore != nil {
+		if err := s.userStore.DeleteUser(username); err != nil {
+			return err
+		}
+	}
+
+	// Delete from in-memory.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[username]; !exists {
+		return errors.New("user not found")
+	}
+	delete(s.users, username)
+	return nil
+}
+
+// ChangePassword changes a user's password.
+func (s *Service) ChangePassword(username, newPassword string) error {
+	username = strings.TrimSpace(username)
+	newPassword = strings.TrimSpace(newPassword)
+	if username == "" || newPassword == "" {
+		return errors.New("username and new password are required")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	passwordHash := string(hash)
+
+	// Update database if available.
+	if s.userStore != nil {
+		if err := s.userStore.UpdatePassword(username, passwordHash); err != nil {
+			return err
+		}
+	}
+
+	// Update in-memory.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, exists := s.users[username]
+	if !exists {
+		return errors.New("user not found")
+	}
+	record.password = passwordHash
+	s.users[username] = record
+	return nil
 }
 
 func (s *Service) ParseToken(token string) (model.User, error) {

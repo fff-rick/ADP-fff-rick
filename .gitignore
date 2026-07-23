@@ -1,8 +1,9 @@
 # binaries
 bin/
-dist/
-/server
-/worker
+server
+worker
+output/
+
 
 # build artifacts
 coverage/
@@ -23,8 +24,3 @@ coverage/
 
 # codegraph
 .codegraph
-
-# node
-node_modules/
-package.json
-package-lock.json

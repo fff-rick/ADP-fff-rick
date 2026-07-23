@@ -15,7 +15,12 @@ type approveJobRequest struct {
 }
 
 func (s *Server) handleListPendingApprovalJobs(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.ListPendingApprovalJobs())
+	if s.repo != nil {
+		jobs, _ := s.repo.ListPendingApprovalJobs()
+		writeJSON(w, http.StatusOK, jobs)
+		return
+	}
+	writeJSON(w, http.StatusOK, []model.Job{})
 }
 
 func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
@@ -36,36 +41,41 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := currentUser(r)
-	var (
-		job model.Job
-		err error
-	)
-	if *req.Approved {
-		job, err = s.store.ApproveJob(jobID, user.Username, req.Comment)
-	} else {
-		job, err = s.store.RejectJob(jobID, user.Username, req.Comment)
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+
+	if s.repo != nil {
+		var (
+			job model.Job
+			err error
+		)
+		if *req.Approved {
+			job, err = s.repo.ApproveJob(jobID, user.Username, req.Comment)
+		} else {
+			job, err = s.repo.RejectJob(jobID, user.Username, req.Comment)
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+
+		if job.SourceType == "diagnosis_plan" {
+			s.updatePlanStatusAfterApproval(job.SourceID)
+		}
+
+		action := "job.approval.rejected"
+		if *req.Approved {
+			action = "job.approval.approved"
+		}
+		s.recordAudit("user", user.Username, action, "job", job.ID, map[string]any{
+			"comment":     req.Comment,
+			"source_type": job.SourceType,
+			"source_id":   job.SourceID,
+			"status":      job.Status,
+		})
+		writeJSON(w, http.StatusOK, job)
 		return
 	}
 
-	if job.SourceType == "diagnosis_plan" {
-		s.updatePlanStatusAfterApproval(job.SourceID)
-	}
-
-	action := "job.approval.rejected"
-	if *req.Approved {
-		action = "job.approval.approved"
-	}
-	s.recordAudit("user", user.Username, action, "job", job.ID, map[string]any{
-		"comment":     req.Comment,
-		"source_type": job.SourceType,
-		"source_id":   job.SourceID,
-		"status":      job.Status,
-	})
-
-	writeJSON(w, http.StatusOK, job)
+	writeError(w, http.StatusInternalServerError, errors.New("no store configured"))
 }
 
 func (s *Server) updatePlanStatusAfterApproval(planID string) {
@@ -73,10 +83,19 @@ func (s *Server) updatePlanStatusAfterApproval(planID string) {
 		return
 	}
 
-	s.planner.Store().Update(planID, func(plan *model.DiagnosisPlan) {
-		synced := s.syncPlanWithJobs(*plan)
-		plan.Status = synced.Status
-		plan.Steps = synced.Steps
-		plan.UpdatedAt = time.Now()
-	})
+	if s.repo == nil {
+		return
+	}
+
+	plan, err := s.repo.GetPlan(planID)
+	if err != nil {
+		return
+	}
+
+	synced := s.syncPlanWithJobs(plan)
+	plan.Status = synced.Status
+	plan.Steps = synced.Steps
+	plan.UpdatedAt = time.Now()
+
+	_ = s.repo.UpdatePlan(planID, plan)
 }

@@ -1,0 +1,32 @@
+trigger_type: http_unreachable
+title: HTTP service unreachable diagnosis
+keywords:
+  - http unavailable
+  - service unreachable
+  - website down
+  - site cannot open
+steps:
+  - step_no: 1
+    name: Check port 80
+    description: Confirm whether the HTTP service is listening on port 80.
+    template_code: check_port
+    parameters:
+      Port: "80"
+    timeout_seconds: 15
+  - step_no: 2
+    name: HTTP health check
+    description: Send a local HTTP request and inspect the response.
+    template_code: http_health_check
+    parameters:
+      URL: http://127.0.0.1:80
+      Timeout: "10"
+    timeout_seconds: 20
+  - step_no: 3
+    name: Read Nginx error log
+    description: Read recent Nginx error log lines for root cause hints.
+    template_code: read_log_tail
+    parameters:
+      ServiceType: nginx
+      LogFile: /var/log/nginx/error.log
+      Lines: "50"
+    timeout_seconds: 15

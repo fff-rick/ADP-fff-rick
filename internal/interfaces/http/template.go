@@ -7,28 +7,24 @@ import (
 	"sort"
 
 	"adp/internal/domain/model"
+	"adp/internal/infrastructure/db"
 	"adp/internal/infrastructure/scheduler"
 )
 
-// handleListTemplates returns all available command templates.
 func (s *Server) handleListTemplates(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.templateEng.ListTemplates())
 }
 
 func (s *Server) handleListTaskJobs(w http.ResponseWriter, _ *http.Request) {
-	jobs := s.store.ListJobs()
-	filtered := make([]model.Job, 0, len(jobs))
-	for _, job := range jobs {
-		if job.SourceType == "task" {
-			filtered = append(filtered, job)
-		}
+	if s.repo != nil {
+		jobs, _ := s.repo.ListJobs(db.JobFilter{SourceType: "task"})
+		sort.Slice(jobs, func(i, j int) bool {
+			return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+		})
+		writeJSON(w, http.StatusOK, jobs)
+		return
 	}
-
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
-	})
-
-	writeJSON(w, http.StatusOK, filtered)
+	writeJSON(w, http.StatusOK, []model.Job{})
 }
 
 type parseTaskRequest struct {
@@ -53,9 +49,7 @@ func (s *Server) handleParseTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run policy risk assessment.
 	intent.RiskLevel = s.policyEng.AssessRisk(*intent)
-
 	writeJSON(w, http.StatusOK, intent)
 }
 
@@ -98,8 +92,16 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	params := cloneStringMap(intent.Parameters)
+	for k, v := range req.Parameters {
+		params[k] = v
+	}
+	if s.aiContext != nil {
+		s.aiContext.FillDefaults(params, tmplCode)
+	}
+
 	// 4. Render command from template.
-	tmpl, cmd, err := s.templateEng.Render(tmplCode, req.Parameters)
+	tmpl, cmd, err := s.templateEng.Render(tmplCode, params)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -114,48 +116,60 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 	riskLevel := s.policyEng.MergeRisk(intent.RiskLevel, tmpl.RiskLevel)
 	intent.RiskLevel = riskLevel
 	needsApproval := s.policyEng.RequiresManualApproval(riskLevel)
-	jobStatus := model.JobStatusQueued
+	jobStatus := model.JobStatusPending
 	approvalStatus := model.ApprovalStatusNotRequired
 	if needsApproval {
 		jobStatus = model.JobStatusWaitingApproval
 		approvalStatus = model.ApprovalStatusPending
 	}
 
-	// 6. Create job and either enqueue or wait for approval.
-	job := s.store.CreateJobWithOptions(
-		fmt.Sprintf("[%s] %s", intent.Intent, req.Input),
-		tmpl.ToolType,
-		cmd,
-		scheduler.CreateJobOptions{
+	user := currentUser(r)
+
+	if s.repo != nil {
+		job := model.Job{
+			Name:             fmt.Sprintf("[%s] %s", intent.Intent, req.Input),
+			WorkerType:       tmpl.ToolType,
+			Command:          cmd,
 			Status:           jobStatus,
 			RiskLevel:        riskLevel,
 			ApprovalRequired: needsApproval,
 			ApprovalStatus:   approvalStatus,
 			TemplateCode:     tmplCode,
+			Parameters:       cloneStringMap(params),
 			SourceType:       "task",
-		},
-	)
-	user := currentUser(r)
-	action := "job.queued"
-	if needsApproval {
-		action = "job.waiting_approval"
-	}
-	s.recordAudit("user", user.Username, action, "job", job.ID, map[string]any{
-		"template_code": tmplCode,
-		"risk_level":    riskLevel,
-		"input":         req.Input,
-	})
+		}
 
-	statusCode := http.StatusCreated
-	if needsApproval {
-		statusCode = http.StatusAccepted
+		created, err := s.repo.CreateJob(job)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+
+		action := "job.created"
+		if needsApproval {
+			action = "job.waiting_approval"
+		}
+		s.recordAudit("user", user.Username, action, "job", created.ID, map[string]any{
+			"template_code": tmplCode,
+			"risk_level":    riskLevel,
+			"input":         req.Input,
+		})
+
+		statusCode := http.StatusCreated
+		if needsApproval {
+			statusCode = http.StatusAccepted
+		}
+		writeJSON(w, statusCode, map[string]any{
+			"job":               created,
+			"approval_required": needsApproval,
+			"parsed_intent":     intent,
+			"template_code":     tmplCode,
+			"rendered_command":  cmd,
+		})
+		return
 	}
 
-	writeJSON(w, statusCode, map[string]any{
-		"job":               job,
-		"approval_required": needsApproval,
-		"parsed_intent":     intent,
-		"template_code":     tmplCode,
-		"rendered_command":  cmd,
-	})
+	// Fallback: no repo. This shouldn't normally happen.
+	_ = scheduler.CreateJobOptions{}
+	writeError(w, http.StatusInternalServerError, errors.New("no store configured"))
 }

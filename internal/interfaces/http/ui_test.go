@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"adp/internal/domain/model"
 )
 
 func TestDashboardUIRoutesAndSummary(t *testing.T) {
@@ -15,7 +17,7 @@ func TestDashboardUIRoutesAndSummary(t *testing.T) {
 		AdminPassword:     "admin123",
 		AuthSecret:        "secret",
 		WorkerSharedToken: "worker-secret",
-	})
+	}, nil, nil)
 	app := httptest.NewServer(server.httpServer.Handler)
 	defer app.Close()
 
@@ -51,8 +53,8 @@ func TestDashboardUIRoutesAndSummary(t *testing.T) {
 		t.Fatalf("Login() error = %v", err)
 	}
 
-	server.store.RegisterWorker("worker-1", "shell")
-	server.store.CreateJob("demo-job", "shell", "echo demo")
+	_, _ = server.repo.RegisterWorker("worker-1", "shell")
+	_, _ = server.repo.CreateJob(model.Job{Name: "demo-job", WorkerType: "shell", Command: "echo demo"})
 
 	summary := dashboardSummaryResponse{}
 	status := mustJSONRequest(t, app.Client(), http.MethodGet, app.URL+"/api/v1/dashboard/summary", token, nil, &summary)

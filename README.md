@@ -57,6 +57,11 @@ ADP/
     server/
     worker/
   configs/
+    server/
+    worker/
+    ai/
+    env/
+    managed/
   deploy/
     docker-compose/
     k8s/
@@ -126,14 +131,33 @@ ADP/
 1. 启动服务端：
 
 ```bash
-go run ./cmd/server
+go run ./cmd/server serve
 ```
+
+服务端默认会尝试读取 `configs/server/adp.yaml`。也可以显式指定：
+
+```bash
+go run ./cmd/server serve --config configs/server/adp.yaml
+```
+
+服务端会同时启动：
+
+- HTTP API/UI：`127.0.0.1:8080`
+- Worker gRPC 双向流：`127.0.0.1:9090`
 
 2. 启动 Worker：
 
 ```bash
-go run ./cmd/worker
+go run ./cmd/worker run
 ```
+
+Worker 默认会尝试读取 `configs/worker/adp.yaml`。也可以显式指定：
+
+```bash
+go run ./cmd/worker run --config configs/worker/adp.yaml
+```
+
+Worker 会连接 `configs/worker/adp.yaml` 中的 `grpc_server_addr`，通过 gRPC 双向流完成注册、心跳、接收任务和回传执行结果。
 
 3. 默认开发账号：
 
@@ -142,7 +166,24 @@ go run ./cmd/worker
 
 4. 配置参考：
 
-- 环境变量示例见 [configs/app.env.example](./configs/app.env.example)
+- 配置目录说明见 [configs/README.md](./configs/README.md)
+- 服务端配置见 [configs/server/adp.yaml](./configs/server/adp.yaml)
+- Worker 配置见 [configs/worker/adp.yaml](./configs/worker/adp.yaml)
+- AI 上下文配置见 [configs/ai/ai_context.yaml](./configs/ai/ai_context.yaml)
+- 环境变量示例见 [configs/env/app.env.example](./configs/env/app.env.example)
+
+## Protobuf 生成
+
+Worker 和 Server 之间使用标准 protobuf + gRPC 双向流，协议文件在 `api/proto/adp/v1/worker.proto`。
+
+修改 proto 后重新生成 Go 代码：
+
+```bash
+protoc --go_out=. --go-grpc_out=. \
+  --go_opt=paths=source_relative \
+  --go-grpc_opt=paths=source_relative \
+  api/proto/adp/v1/worker.proto
+```
 
 ## API 总览
 
@@ -152,7 +193,7 @@ go run ./cmd/worker
 |------|------|------|
 | GET | `/api/v1/templates` | 列出所有可用命令模板 |
 | POST | `/api/v1/tasks/parse` | 将自然语言解析为结构化任务 |
-| POST | `/api/v1/tasks/run` | 全链路执行（解析→模板渲染→白名单校验→入队） |
+| POST | `/api/v1/tasks/run` | 创建受控任务（解析→模板渲染→白名单校验→等待审批或调度） |
 
 ### Phase 3 诊断 API
 

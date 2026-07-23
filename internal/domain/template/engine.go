@@ -6,6 +6,7 @@ import (
 	"text/template"
 
 	"adp/internal/domain/model"
+	"adp/internal/module"
 )
 
 // Engine manages command templates: registration, lookup, and rendering.
@@ -24,10 +25,42 @@ func NewEngine() *Engine {
 	return e
 }
 
+// RegisterModule converts a Module to a CommandTemplate and registers it.
+// Does NOT overwrite existing templates (builtin templates take precedence).
+func (e *Engine) RegisterModule(m module.Module) {
+	if _, exists := e.templates[m.Code()]; exists {
+		return // already registered, skip
+	}
+	params := m.Parameters()
+	tmplParams := make([]model.TemplateParam, len(params))
+	for i, p := range params {
+		tmplParams[i] = model.TemplateParam{
+			Name:        p.Name,
+			Description: p.Description,
+			Required:    p.Required,
+			Default:     p.Default,
+		}
+	}
+	e.templates[m.Code()] = model.CommandTemplate{
+		Code:        m.Code(),
+		Name:        m.Name(),
+		Description: m.Description(),
+		ToolType:    m.ToolType(),
+		Command:     "", // module-based, not shell template
+		Parameters:  tmplParams,
+		RiskLevel:   m.RiskLevel(),
+	}
+}
+
 // GetTemplate returns a template by code.
 func (e *Engine) GetTemplate(code string) (model.CommandTemplate, bool) {
 	t, ok := e.templates[code]
 	return t, ok
+}
+
+// RegisterTemplate registers or replaces a command template.
+func (e *Engine) RegisterTemplate(t model.CommandTemplate) {
+	e.templates[t.Code] = t
 }
 
 // ListTemplates returns all registered templates.

@@ -30,6 +30,7 @@ type CreateJobOptions struct {
 	ApprovalStatus   model.ApprovalStatus
 	ApprovalComment  string
 	TemplateCode     string
+	Parameters       map[string]string
 	SourceType       string
 	SourceID         string
 }
@@ -99,7 +100,7 @@ func (s *Store) CreateJobWithOptions(name, workerType, command string, opts Crea
 	now := time.Now()
 	status := opts.Status
 	if status == "" {
-		status = model.JobStatusQueued
+		status = model.JobStatusPending
 	}
 	approvalStatus := opts.ApprovalStatus
 	if opts.ApprovalRequired && approvalStatus == "" {
@@ -120,6 +121,7 @@ func (s *Store) CreateJobWithOptions(name, workerType, command string, opts Crea
 		ApprovalStatus:   approvalStatus,
 		ApprovalComment:  opts.ApprovalComment,
 		TemplateCode:     opts.TemplateCode,
+		Parameters:       cloneStringMap(opts.Parameters),
 		SourceType:       opts.SourceType,
 		SourceID:         opts.SourceID,
 		CreatedAt:        now,
@@ -131,6 +133,17 @@ func (s *Store) CreateJobWithOptions(name, workerType, command string, opts Crea
 	s.jobs[job.ID] = job
 
 	return job
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Store) ListJobs() []model.Job {
@@ -168,7 +181,7 @@ func (s *Store) AssignNextJob(workerID string) (model.Job, bool) {
 	)
 
 	for id, job := range s.jobs {
-		if job.Status != model.JobStatusQueued || job.WorkerType != worker.WorkerType {
+		if (job.Status != model.JobStatusQueued && job.Status != model.JobStatusPending) || job.WorkerType != worker.WorkerType {
 			continue
 		}
 
@@ -220,6 +233,32 @@ func (s *Store) CompleteJob(workerID, jobID, output string, success bool) (model
 	return job, nil
 }
 
+func (s *Store) AssignJobToWorker(jobID, workerID string) (model.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	worker, ok := s.workers[workerID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("worker not found")
+	}
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("job not found")
+	}
+	if job.WorkerType != worker.WorkerType {
+		return model.Job{}, fmt.Errorf("worker type does not match job type")
+	}
+
+	now := time.Now()
+	job.Status = model.JobStatusRunning
+	job.AssignedWorkerID = workerID
+	job.StartedAt = &now
+	job.UpdatedAt = now
+	s.jobs[jobID] = job
+	return job, nil
+}
+
 func (s *Store) ListPendingApprovalJobs() []model.Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -246,7 +285,7 @@ func (s *Store) ApproveJob(jobID, approvedBy, comment string) (model.Job, error)
 	}
 
 	now := time.Now()
-	job.Status = model.JobStatusQueued
+	job.Status = model.JobStatusPending
 	job.ApprovalStatus = model.ApprovalStatusApproved
 	job.ApprovedBy = approvedBy
 	job.ApprovedAt = &now

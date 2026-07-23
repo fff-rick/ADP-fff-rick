@@ -1,0 +1,41 @@
+id: default
+name: Default execution policy
+allowed_tools:
+  - mysqldump
+  - curl
+  - redis-cli
+  - mysql
+  - echo
+  - grep
+  - df
+  - free
+  - uptime
+  - netstat
+  - ss
+  - tail
+  - ps
+  - awk
+allowed_templates:
+  - mysql_backup
+  - http_health_check
+  - check_process
+  - check_port
+  - read_log_tail
+  - redis_ping
+  - redis_info
+  - redis_slowlog_get
+  - redis_client_list
+  - disk_usage_check
+high_risk_keywords:
+  - delete
+  - drop
+  - restart
+  - reboot
+  - shutdown
+  - kill
+  - "rm "
+  - mkfs
+  - "dd "
+approval_risk_levels:
+  - medium
+  - high

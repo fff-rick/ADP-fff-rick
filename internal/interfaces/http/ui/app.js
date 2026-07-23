@@ -194,25 +194,84 @@ async function handleCreateUser(event) {
   }
 }
 
+/* ── Deploy Mode Toggle ── */
+var deployMode = "local";
+
+function switchDeployMode(mode) {
+  deployMode = mode;
+  var localBtn = document.getElementById("deploy-mode-local");
+  var remoteBtn = document.getElementById("deploy-mode-remote");
+  var remoteFields = document.getElementById("remote-deploy-fields");
+  var submitBtn = document.getElementById("worker-submit-btn");
+
+  if (mode === "remote") {
+    localBtn.className = "btn btn-xs btn-ghost";
+    remoteBtn.className = "btn btn-xs btn-primary";
+    if (remoteFields) remoteFields.style.display = "";
+    if (submitBtn) submitBtn.textContent = "部署 Worker";
+  } else {
+    localBtn.className = "btn btn-xs btn-primary";
+    remoteBtn.className = "btn btn-xs btn-ghost";
+    if (remoteFields) remoteFields.style.display = "none";
+    if (submitBtn) submitBtn.textContent = "创建 Worker";
+  }
+}
+
 async function handleCreateWorker(event) {
   event.preventDefault();
   if (!ensureAuthed()) return;
 
   try {
-    var worker = await authedRequest("/api/v1/workers", {
+    var body = {
+      name: valueOf("worker-name"),
+      worker_type: valueOf("worker-type"),
+    };
+
+    if (deployMode === "remote") {
+      var sshPort = parseInt(valueOf("ssh-port")) || 22;
+      body.ssh_host = valueOf("ssh-host");
+      body.ssh_port = sshPort;
+      body.ssh_user = valueOf("ssh-user");
+      body.ssh_password = valueOf("ssh-password");
+      body.log_to_db = document.getElementById("worker-log-to-db").checked;
+    }
+
+    var workerResp = await authedRequest("/api/v1/workers", {
       method: "POST",
-      body: JSON.stringify({
-        name: valueOf("worker-name"),
-        worker_type: valueOf("worker-type"),
-      }),
+      body: JSON.stringify(body),
     });
+
     elements.workerForm.reset();
     byId("worker-type").value = "shell";
-    showToast("Worker " + worker.name + " 已创建");
+    if (deployMode === "remote") {
+      switchDeployMode("local");
+    }
+
+    if (workerResp.deploying) {
+      showToast("Worker " + workerResp.worker.name + " 正在部署到 " + workerResp.ssh_host + " ...");
+    } else {
+      showToast("Worker " + workerResp.name + " 已创建");
+    }
     await refreshWorkersPage();
   } catch (error) {
     showToast(error.message);
   }
+}
+
+async function loadWorkerOptions() {
+  var select = document.getElementById("job-worker-ids");
+  if (!select || !state.token) return;
+  try {
+    var workers = await authedRequest("/api/v1/workers");
+    select.innerHTML = "";
+    for (var i = 0; i < workers.length; i++) {
+      var w = workers[i];
+      var opt = document.createElement("option");
+      opt.value = w.id;
+      opt.textContent = w.name + " (" + w.worker_type + ") - " + w.status;
+      select.appendChild(opt);
+    }
+  } catch (_) {}
 }
 
 async function handleCreateJob(event) {
@@ -220,21 +279,202 @@ async function handleCreateJob(event) {
   if (!ensureAuthed()) return;
 
   try {
-    var job = await authedRequest("/api/v1/jobs", {
+    var body = {
+      name: valueOf("job-name"),
+      worker_type: valueOf("job-worker-type"),
+      command: valueOf("job-command"),
+    };
+
+    var select = document.getElementById("job-worker-ids");
+    var selected = [];
+    if (select) {
+      for (var i = 0; i < select.options.length; i++) {
+        if (select.options[i].selected) selected.push(select.options[i].value);
+      }
+    }
+    if (selected.length === 0) {
+      showToast("请选择至少一个 Worker");
+      return;
+    }
+    body.worker_ids = selected;
+
+    var result = await authedRequest("/api/v1/jobs", {
       method: "POST",
-      body: JSON.stringify({
-        name: valueOf("job-name"),
-        worker_type: valueOf("job-worker-type"),
-        command: valueOf("job-command"),
-      }),
+      body: JSON.stringify(body),
     });
+
     elements.jobForm.reset();
     byId("job-worker-type").value = "shell";
-    showToast("Job " + job.id + " 已创建");
+    await loadWorkerOptions();
+
+    if (result.jobs) {
+      showToast("已创建 " + result.total + " 个 Job，分配给 " + (result.worker_ids || []).length + " 个 Worker");
+    } else {
+      showToast("Job " + result.id + " 已创建");
+    }
     await refreshJobsPage();
   } catch (error) {
     showToast(error.message);
   }
+}
+
+/* ── YAML Batch Job ── */
+
+var yamlJobForm = document.getElementById("yaml-job-form");
+if (yamlJobForm) {
+  yamlJobForm.addEventListener("submit", handleYAMLJobSubmit);
+}
+
+async function handleYAMLJobSubmit(event) {
+  event.preventDefault();
+  if (!ensureAuthed()) return;
+
+  var yamlText = document.getElementById("yaml-input").value.trim();
+  if (!yamlText) { showToast("请输入 YAML 配置"); return; }
+
+  try {
+    var result = await authedRequest("/api/v1/jobs/yaml", {
+      method: "POST",
+      body: JSON.stringify({ yaml: yamlText }),
+    });
+    showToast("YAML 批量调度完成：创建了 " + result.total + " 个 Job");
+    await refreshJobsPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+/* ── 点击模板自动填充 Task ── */
+
+// Template code → natural language prompt mapping.
+var templatePrompts = {
+  mysql_backup:          { prompt: "每天备份 mysql 数据库", params: '{"Database":"demo","Password":"secret"}' },
+  http_health_check:     { prompt: "检查 http://127.0.0.1 是否正常",  params: '{"URL":"http://127.0.0.1"}' },
+  check_process:         { prompt: "检查 nginx 进程是否运行",       params: '{"Process":"nginx"}' },
+  check_port:            { prompt: "检查 80 端口是否监听",          params: '{"Port":"80"}' },
+  read_log_tail:         { prompt: "查看 nginx 错误日志",          params: '{"LogFile":"/var/log/nginx/error.log","Lines":"50"}' },
+  redis_ping:            { prompt: "检查 Redis 是否响应 PING",     params: '{"Host":"127.0.0.1"}' },
+  redis_info:            { prompt: "查看 Redis 内存信息",          params: '{"Host":"127.0.0.1"}' },
+  redis_slowlog_get:     { prompt: "查看 Redis 慢查询日志",        params: '{"Host":"127.0.0.1","Count":"10"}' },
+  redis_client_list:     { prompt: "查看 Redis 客户端连接列表",    params: '{"Host":"127.0.0.1"}' },
+};
+
+function quickFillFromTemplate(code, name, paramsJSON) {
+  if (!elements.taskInput) return;
+
+  var preset = templatePrompts[code];
+  if (preset) {
+    elements.taskInput.value = preset.prompt;
+    if (elements.taskParams) elements.taskParams.value = preset.params;
+  } else {
+    elements.taskInput.value = name;
+    // Auto-generate params from template parameter definitions.
+    var params = [];
+    try {
+      params = JSON.parse(decodeURIComponent(paramsJSON));
+    } catch (_) {}
+    var defaultParams = {};
+    for (var i = 0; i < params.length; i++) {
+      if (params[i].default) defaultParams[params[i].name] = params[i].default;
+    }
+    if (elements.taskParams) elements.taskParams.value = JSON.stringify(defaultParams);
+  }
+
+  showToast("已选中模板: " + name + " — 点击 解析 Task 查看结果");
+}
+
+/* ── Generate YAML from NL ── */
+
+async function handleGenerateYAML() {
+  if (!ensureAuthed()) return;
+  var input = elements.taskInput ? elements.taskInput.value.trim() : "";
+  if (!input) { showToast("先输入任务描述"); return; }
+  try {
+    var result = await authedRequest("/api/v1/tasks/generate-yaml", {
+      method: "POST",
+      body: JSON.stringify({ input: input }),
+    });
+    if (elements.taskOutput) {
+      elements.taskOutput.textContent = result.yaml;
+      // Store generated YAML for potential save.
+      elements.taskOutput.dataset.yamlContent = result.yaml;
+      elements.taskOutput.dataset.yamlName = result.parsed_name || "untitled";
+    }
+    showToast("YAML 已生成" + (result.used_ai ? " (AI)" : " (规则)") + " — 可保存或直接运行");
+    // Show save button.
+    var saveBtn = document.getElementById("save-yaml-btn");
+    if (saveBtn) saveBtn.style.display = "";
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleSaveGeneratedYAML() {
+  if (!ensureAuthed()) return;
+  var yamlContent = elements.taskOutput ? elements.taskOutput.dataset.yamlContent : "";
+  if (!yamlContent) { showToast("先生成 YAML"); return; }
+  var name = elements.taskOutput.dataset.yamlName || "untitled";
+  try {
+    await authedRequest("/api/v1/yamls", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name,
+        description: elements.taskInput ? elements.taskInput.value.trim() : "",
+        yaml_content: yamlContent,
+      }),
+    });
+    showToast("YAML 已保存: " + name);
+    await refreshYAMLList();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleRunStoredYAML(yamlId) {
+  if (!ensureAuthed()) return;
+  try {
+    var result = await authedRequest("/api/v1/yamls/" + yamlId + "/run", { method: "POST" });
+    showToast("已从 YAML 创建 " + result.total + " 个 Job");
+    await refreshTasksPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleDeleteStoredYAML(yamlId) {
+  if (!ensureAuthed()) return;
+  if (!confirm("确定删除此 YAML 模板？")) return;
+  try {
+    await authedRequest("/api/v1/yamls/" + yamlId, { method: "DELETE" });
+    showToast("YAML 已删除");
+    await refreshYAMLList();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function refreshYAMLList() {
+  var container = document.getElementById("yaml-list");
+  if (!container || !state.token) return;
+  try {
+    var yamls = await authedRequest("/api/v1/yamls");
+    renderList(container, yamls, function(jy) {
+      return '<div class="list-card">' +
+        '<div style="flex: 1;">' +
+          '<strong style="font-size: 0.875rem;">' + escapeHTML(jy.name) + '</strong>' +
+          '<span style="font-size: 0.6875rem; color: var(--text-tertiary); margin-left: 8px;">' + escapeHTML(jy.source) + '</span>' +
+        '</div>' +
+        '<div class="list-card-meta">' +
+          '<span class="mono" style="font-size: 0.6875rem;">' + escapeHTML(jy.id) + '</span>' +
+          '<span>' + formatTime(jy.created_at) + '</span>' +
+        '</div>' +
+        '<div style="display: flex; gap: 4px; margin-left: 8px;">' +
+          '<button class="btn btn-xs btn-primary" onclick="handleRunStoredYAML(\'' + escapeHTML(jy.id) + '\')">运行</button>' +
+          '<button class="btn btn-xs btn-ghost" onclick="handleDeleteStoredYAML(\'' + escapeHTML(jy.id) + '\')" style="color: var(--danger);">删除</button>' +
+        '</div>' +
+      '</div>';
+    }, "暂无保存的 YAML 模板。");
+  } catch (_) {}
 }
 
 async function handleTaskSubmit(event) {
@@ -264,6 +504,10 @@ async function handleTaskSubmit(event) {
       });
       if (elements.taskOutput) {
         elements.taskOutput.textContent = JSON.stringify(parseResult, null, 2);
+      }
+      if (parseResult.intent === "diagnose") {
+        showToast("已识别为诊断意图，多步骤计划请点击生成 YAML");
+        return;
       }
       showToast("Task 解析完成");
       return;
@@ -382,12 +626,23 @@ async function refreshUsersPage() {
     elements.userList,
     users,
     function(user) {
+      var isAdmin = state.user && state.user.role === "admin";
+      var buttons = '';
+      if (isAdmin && user.username !== state.user.username) {
+        buttons += '<button class="btn btn-xs btn-ghost" onclick="handleDeleteUser(\'' + escapeHTML(user.username) + '\')" style="color: var(--danger);">删除</button>';
+      }
+      if (isAdmin || (state.user && state.user.username === user.username)) {
+        buttons += '<button class="btn btn-xs btn-ghost" onclick="handleChangePassword(\'' + escapeHTML(user.username) + '\')">改密</button>';
+      }
       return '<div class="list-card">' +
         '<div style="flex: 1;">' +
           '<strong style="font-size: 0.875rem;">' + escapeHTML(user.username) + '</strong>' +
           '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 10px;">' + escapeHTML(user.role) + '</span>' +
         '</div>' +
-        '<span class="status-pill" style="background: var(--info-bg); color: var(--info);">' + escapeHTML(user.role) + '</span>' +
+        '<div style="display: flex; gap: 6px; align-items: center;">' +
+          '<span class="status-pill" style="background: var(--info-bg); color: var(--info);">' + escapeHTML(user.role) + '</span>' +
+          buttons +
+        '</div>' +
       '</div>';
     },
     "暂无用户。"
@@ -404,15 +659,31 @@ async function refreshWorkersPage() {
     elements.workerList,
     workers,
     function(worker) {
+      var hostInfo = '';
+      if (worker.host_info && worker.host_info.hostname) {
+        hostInfo = '<div style="font-size: 0.7rem; color: var(--text-tertiary); margin-top: 2px;">' +
+          escapeHTML(worker.host_info.hostname) + ' | ' + escapeHTML(worker.host_info.ip_address || '--') +
+          ' | CPU:' + (worker.host_info.cpu_usage || 0).toFixed(0) + '%' +
+          ' | Disk:' + (worker.host_info.storage_usage || 0).toFixed(0) + '%' +
+        '</div>';
+      }
+      var buttons = '';
+      if (state.user) {
+        buttons += '<button class="btn btn-xs btn-ghost" onclick="handleStopWorker(\'' + escapeHTML(worker.id) + '\', false)" style="color: var(--warning);">停止</button>';
+        buttons += '<button class="btn btn-xs btn-ghost" onclick="handleRestartWorker(\'' + escapeHTML(worker.id) + '\')">重启</button>';
+        buttons += '<button class="btn btn-xs btn-ghost" onclick="handleDeleteWorkerById(\'' + escapeHTML(worker.id) + '\')" style="color: var(--danger);">删除</button>';
+      }
       return '<div class="list-card">' +
         '<div style="flex: 1;">' +
           '<strong style="font-size: 0.875rem;">' + escapeHTML(worker.name) + '</strong>' +
           '<span class="mono" style="font-size: 0.6875rem; color: var(--text-tertiary); margin-left: 8px;">' + escapeHTML(worker.id) + '</span>' +
+          hostInfo +
         '</div>' +
         '<div class="list-card-meta">' +
           '<span class="status-pill ' + statusClass(worker.status) + '"><span class="status-dot"></span>' + escapeHTML(worker.status) + '</span>' +
           '<span>' + formatTime(worker.last_heartbeat_at) + '</span>' +
         '</div>' +
+        (buttons ? '<div style="display: flex; gap: 4px; margin-left: 8px;">' + buttons + '</div>' : '') +
       '</div>';
     },
     "暂无 Worker。"
@@ -425,10 +696,20 @@ async function refreshJobsPage() {
   updateSessionState(summary.current_time);
 
   var jobs = await authedRequest("/api/v1/jobs?limit=16");
+  await loadWorkerOptions();
   renderList(
     elements.jobList,
     jobs,
     function(job) {
+      var deletable = ["pending", "queued", "waiting_approval"].indexOf(job.status) >= 0;
+      var deleteBtn = '';
+      var dispatchBtn = '';
+      if (job.status === "pending" && state.user) {
+        dispatchBtn = '<button class="btn btn-xs btn-primary" onclick="handleDispatchJob(\'' + escapeHTML(job.id) + '\')">调度</button>';
+      }
+      if (deletable && state.user) {
+        deleteBtn = '<button class="btn btn-xs btn-ghost" onclick="handleDeleteJob(\'' + escapeHTML(job.id) + '\')" style="color: var(--danger);">删除</button>';
+      }
       return '<div class="list-card">' +
         '<div style="flex: 1;">' +
           '<strong style="font-size: 0.875rem;">' + escapeHTML(job.name) + '</strong>' +
@@ -439,11 +720,35 @@ async function refreshJobsPage() {
           '<span class="mono">' + escapeHTML(job.worker_type) + '</span>' +
           '<span>' + formatTime(job.updated_at) + '</span>' +
         '</div>' +
+        ((dispatchBtn || deleteBtn) ? '<div style="display:flex; gap:6px; margin-left: 8px;">' + dispatchBtn + deleteBtn + '</div>' : '') +
       '</div>';
     },
     "暂无 Job。"
   );
   renderApprovals(summary.pending_approvals);
+}
+
+async function handleDispatchJob(jobID) {
+  if (!ensureAuthed()) return;
+  var value = window.prompt("输入目标 Worker ID，多个用英文逗号分隔");
+  if (!value) return;
+  var workerIDs = value.split(",").map(function(item) {
+    return item.trim();
+  }).filter(Boolean);
+  if (workerIDs.length === 0) {
+    showToast("请输入 Worker ID");
+    return;
+  }
+  try {
+    var result = await authedRequest("/api/v1/jobs/" + encodeURIComponent(jobID) + "/dispatch", {
+      method: "POST",
+      body: JSON.stringify({ worker_ids: workerIDs }),
+    });
+    showToast("已调度 " + result.total + " 个 Job");
+    await refreshJobsPage();
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 async function refreshTasksPage() {
@@ -481,7 +786,7 @@ async function refreshTasksPage() {
     elements.templateList,
     templates,
     function(template) {
-      return '<div class="list-card">' +
+      return '<div class="list-card template-card" onclick="quickFillFromTemplate(\'' + escapeHTML(template.code) + '\',\'' + escapeHTML(template.name) + '\',\'' + escapeHTML(JSON.stringify(template.parameters || [])) + '\')" style="cursor: pointer;">' +
         '<div style="flex: 1;">' +
           '<strong style="font-size: 0.875rem;">' + escapeHTML(template.name) + '</strong>' +
           '<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 8px;">' + escapeHTML(template.description || template.code) + '</span>' +
@@ -489,11 +794,90 @@ async function refreshTasksPage() {
         '<div class="list-card-meta">' +
           '<span class="status-pill" style="background: var(--accent-bg); color: var(--accent);">' + escapeHTML(template.tool_type) + '</span>' +
           '<span class="mono">' + escapeHTML(template.code) + '</span>' +
+          '<span style="font-size: 0.6875rem; color: var(--accent);">点击使用 →</span>' +
         '</div>' +
       '</div>';
     },
     "暂无模板。"
   );
+  await refreshYAMLList();
+}
+
+/* ── New Feature Handlers ── */
+
+async function handleDeleteUser(username) {
+  if (!ensureAuthed()) return;
+  if (!confirm("确定要删除用户 " + username + " 吗？")) return;
+  try {
+    await authedRequest("/api/v1/users/" + username, { method: "DELETE" });
+    showToast("用户 " + username + " 已删除");
+    await refreshCurrentPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleChangePassword(username) {
+  if (!ensureAuthed()) return;
+  var newPass = prompt("为 " + username + " 输入新密码：");
+  if (!newPass) return;
+  try {
+    await authedRequest("/api/v1/users/" + username + "/password", {
+      method: "PUT",
+      body: JSON.stringify({ new_password: newPass }),
+    });
+    showToast("密码已更新");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleDeleteJob(jobId) {
+  if (!ensureAuthed()) return;
+  if (!confirm("确定要删除 Job " + jobId + " 吗？")) return;
+  try {
+    await authedRequest("/api/v1/jobs/" + jobId, { method: "DELETE" });
+    showToast("Job " + jobId + " 已删除");
+    await refreshCurrentPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleStopWorker(workerId, force) {
+  if (!ensureAuthed()) return;
+  try {
+    var url = "/api/v1/workers/" + workerId + "/stop";
+    if (force) url += "?force=true";
+    await authedRequest(url, { method: "POST" });
+    showToast(force ? "已发送强制停止指令" : "已发送停止指令");
+    await refreshCurrentPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleRestartWorker(workerId) {
+  if (!ensureAuthed()) return;
+  try {
+    await authedRequest("/api/v1/workers/" + workerId + "/restart", { method: "POST" });
+    showToast("已发送重启指令");
+    await refreshCurrentPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function handleDeleteWorkerById(workerId) {
+  if (!ensureAuthed()) return;
+  if (!confirm("确定要删除 Worker " + workerId + " 吗？此操作不可撤销。")) return;
+  try {
+    await authedRequest("/api/v1/workers/" + workerId, { method: "DELETE" });
+    showToast("Worker " + workerId + " 已删除");
+    await refreshCurrentPage();
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 /* ── Render Helpers ── */
@@ -594,12 +978,20 @@ function updateSessionState(serverTime) {
   if (!elements.sessionState) return;
   if (state.user && state.user.username) {
     elements.sessionState.textContent = state.user.username + " / " + state.user.role;
+    // Show logout button, hide login button
+    if (elements.logoutButton) elements.logoutButton.style.display = "";
+    var loginBtn = document.getElementById("login-nav-btn");
+    if (loginBtn) loginBtn.style.display = "none";
     if (elements.loginMessage && serverTime) {
       elements.loginMessage.textContent = "最近同步：" + formatTime(serverTime);
     }
     return;
   }
   elements.sessionState.textContent = "未登录";
+  // Show login button, hide logout button
+  if (elements.logoutButton) elements.logoutButton.style.display = "none";
+  var loginBtn = document.getElementById("login-nav-btn");
+  if (loginBtn) loginBtn.style.display = "";
 }
 
 /* ── Auth Helpers ── */

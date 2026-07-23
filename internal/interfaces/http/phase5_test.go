@@ -18,7 +18,7 @@ func TestIncidentCaseAndMetricsEndpoints(t *testing.T) {
 		AdminPassword:     "admin123",
 		AuthSecret:        "secret",
 		WorkerSharedToken: "worker-secret",
-	})
+	}, nil, nil)
 	app := httptest.NewServer(server.httpServer.Handler)
 	defer app.Close()
 
@@ -28,21 +28,20 @@ func TestIncidentCaseAndMetricsEndpoints(t *testing.T) {
 	}
 
 	now := time.Now()
-	server.store.UpsertIncidentCase(model.DiagnosisPlan{
-		ID:          "plan-1",
-		Title:       "Nginx 不可访问诊断",
-		Description: "nginx 无法访问",
-		TriggerType: "nginx_unreachable",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}, model.AnalysisReport{
-		PlanID:         "plan-1",
+	if _, err := server.repo.UpsertIncidentCase("plan-1", model.IncidentCase{
+		Title:          "Nginx 不可访问诊断",
+		TriggerType:    "nginx_unreachable",
 		FaultType:      "Nginx 服务异常",
+		Summary:        "Nginx 进程未运行",
 		PossibleCauses: []string{"Nginx 进程未运行"},
 		Suggestions:    []string{"systemctl start nginx"},
 		Confidence:     0.9,
+		SourcePlanID:   "plan-1",
 		CreatedAt:      now,
-	})
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("UpsertIncidentCase() error = %v", err)
+	}
 
 	var cases []model.IncidentCase
 	status := mustJSONRequest(t, app.Client(), http.MethodGet, app.URL+"/api/v1/cases?trigger_type=nginx_unreachable", token, nil, &cases)
@@ -68,12 +67,12 @@ func TestIncidentCaseAndMetricsEndpoints(t *testing.T) {
 		t.Fatal("expected historical hints")
 	}
 
-	worker := server.store.RegisterWorker("worker-1", "shell")
-	job := server.store.CreateJob("job-1", "shell", "echo demo")
-	if _, ok := server.store.AssignNextJob(worker.ID); !ok {
+	worker, _ := server.repo.RegisterWorker("worker-1", "shell")
+	job, _ := server.repo.CreateJob(model.Job{Name: "job-1", WorkerType: "shell", Command: "echo demo"})
+	if _, err := server.repo.AssignNextJob(worker.ID); err != nil {
 		t.Fatal("expected job assignment")
 	}
-	if _, err := server.store.CompleteJob(worker.ID, job.ID, "done", true); err != nil {
+	if _, err := server.repo.CompleteJob(worker.ID, job.ID, "done", true); err != nil {
 		t.Fatalf("CompleteJob() error = %v", err)
 	}
 

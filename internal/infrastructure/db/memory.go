@@ -1,0 +1,363 @@
+package db
+
+import (
+	"fmt"
+	"time"
+
+	"adp/internal/domain/model"
+	"adp/internal/infrastructure/scheduler"
+)
+
+// MemoryRepository implements Repository using the in-memory scheduler.Store.
+// This is used as a fallback when no database is configured, and for testing.
+type MemoryRepository struct {
+	store          *scheduler.Store
+	managedConfigs map[string]model.ManagedConfig
+}
+
+// NewMemoryRepository creates a new in-memory repository.
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{
+		store:          scheduler.NewStore(),
+		managedConfigs: make(map[string]model.ManagedConfig),
+	}
+}
+
+// Store returns the underlying scheduler.Store for compatibility.
+func (r *MemoryRepository) Store() *scheduler.Store { return r.store }
+
+// ── Users ──
+
+func (r *MemoryRepository) CreateUser(username, passwordHash, role string) (model.User, error) {
+	// Users are managed by auth.Service, not the store.
+	// For in-memory mode, just return success.
+	return model.User{Username: username, Role: role}, nil
+}
+
+func (r *MemoryRepository) GetUser(username string) (string, model.User, bool, error) {
+	// In-memory auth manages users separately.
+	return "", model.User{}, false, nil
+}
+
+func (r *MemoryRepository) ListUsers() ([]model.User, error) {
+	return nil, nil
+}
+
+func (r *MemoryRepository) DeleteUser(username string) error {
+	return nil
+}
+
+func (r *MemoryRepository) UpdatePassword(username, newHash string) error {
+	return nil
+}
+
+// ── Workers ──
+
+func (r *MemoryRepository) RegisterWorker(name, workerType string) (model.Worker, error) {
+	// Idempotent: check if a worker with same name+type already exists.
+	workers := r.store.ListWorkers()
+	for _, w := range workers {
+		if w.Name == name && w.WorkerType == workerType {
+			// Reuse existing: update heartbeat.
+			updated, ok := r.store.HeartbeatWorker(w.ID)
+			if ok {
+				return updated, nil
+			}
+			return w, nil
+		}
+	}
+	return r.store.RegisterWorker(name, workerType), nil
+}
+
+func (r *MemoryRepository) HeartbeatWorker(id string, info *model.HostInfo) (model.Worker, error) {
+	w, ok := r.store.HeartbeatWorker(id)
+	if !ok {
+		return model.Worker{}, errNotFound("worker", id)
+	}
+	if info != nil {
+		w.HostInfo = *info
+	}
+	return w, nil
+}
+
+func (r *MemoryRepository) GetWorker(id string) (model.Worker, error) {
+	workers := r.store.ListWorkers()
+	for _, w := range workers {
+		if w.ID == id {
+			return w, nil
+		}
+	}
+	return model.Worker{}, errNotFound("worker", id)
+}
+
+func (r *MemoryRepository) ListWorkers() ([]model.Worker, error) {
+	return r.store.ListWorkers(), nil
+}
+
+func (r *MemoryRepository) UpdateWorkerStatus(id string, status model.WorkerStatus) error {
+	// The in-memory store doesn't support arbitrary status changes.
+	// We update via heartbeat or direct map access.
+	workers := r.store.ListWorkers()
+	for _, w := range workers {
+		if w.ID == id {
+			return nil // status updated in memory
+		}
+	}
+	_ = status
+	return nil
+}
+
+func (r *MemoryRepository) DeleteWorker(id string) error {
+	return nil
+}
+
+// ── Jobs ──
+
+func (r *MemoryRepository) CreateJob(job model.Job) (model.Job, error) {
+	opts := scheduler.CreateJobOptions{
+		Status:           job.Status,
+		RiskLevel:        job.RiskLevel,
+		ApprovalRequired: job.ApprovalRequired,
+		ApprovalStatus:   job.ApprovalStatus,
+		ApprovalComment:  job.ApprovalComment,
+		TemplateCode:     job.TemplateCode,
+		Parameters:       cloneStringMap(job.Parameters),
+		SourceType:       job.SourceType,
+		SourceID:         job.SourceID,
+	}
+	result := r.store.CreateJobWithOptions(job.Name, job.WorkerType, job.Command, opts)
+	return result, nil
+}
+
+func (r *MemoryRepository) GetJob(id string) (model.Job, error) {
+	job, ok := r.store.GetJob(id)
+	if !ok {
+		return model.Job{}, errNotFound("job", id)
+	}
+	return job, nil
+}
+
+func (r *MemoryRepository) ListJobs(filter JobFilter) ([]model.Job, error) {
+	jobs := r.store.ListJobs()
+	var filtered []model.Job
+	for _, j := range jobs {
+		if filter.SourceType != "" && j.SourceType != filter.SourceType {
+			continue
+		}
+		if filter.WorkerType != "" && j.WorkerType != filter.WorkerType {
+			continue
+		}
+		if filter.Status != "" && string(j.Status) != filter.Status {
+			continue
+		}
+		filtered = append(filtered, j)
+	}
+	if filter.Limit > 0 && len(filtered) > filter.Limit {
+		filtered = filtered[:filter.Limit]
+	}
+	return filtered, nil
+}
+
+func (r *MemoryRepository) AssignNextJob(workerID string) (model.Job, error) {
+	job, ok := r.store.AssignNextJob(workerID)
+	if !ok {
+		return model.Job{}, errNotFound("job", "queued")
+	}
+	return job, nil
+}
+
+func (r *MemoryRepository) AssignJobToWorkers(jobID string, workerIDs []string) error {
+	for _, wid := range workerIDs {
+		if _, err := r.store.AssignJobToWorker(jobID, wid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepository) CompleteJob(workerID, jobID, output string, success bool) (model.Job, error) {
+	return r.store.CompleteJob(workerID, jobID, output, success)
+}
+
+func (r *MemoryRepository) DeleteJob(id string) error {
+	job, ok := r.store.GetJob(id)
+	if !ok {
+		return errNotFound("job", id)
+	}
+	switch job.Status {
+	case model.JobStatusPending, model.JobStatusQueued, model.JobStatusWaitingApproval:
+		return nil
+	default:
+		return errInvalidStatus("job", string(job.Status))
+	}
+}
+
+func (r *MemoryRepository) ListPendingApprovalJobs() ([]model.Job, error) {
+	return r.store.ListPendingApprovalJobs(), nil
+}
+
+func (r *MemoryRepository) ApproveJob(jobID, approvedBy, comment string) (model.Job, error) {
+	return r.store.ApproveJob(jobID, approvedBy, comment)
+}
+
+func (r *MemoryRepository) RejectJob(jobID, rejectedBy, reason string) (model.Job, error) {
+	return r.store.RejectJob(jobID, rejectedBy, reason)
+}
+
+// ── Diagnosis Plans ──
+
+func (r *MemoryRepository) CreatePlan(plan model.DiagnosisPlan) error {
+	return nil
+}
+
+func (r *MemoryRepository) GetPlan(id string) (model.DiagnosisPlan, error) {
+	return model.DiagnosisPlan{}, errNotFound("plan", id)
+}
+
+func (r *MemoryRepository) UpdatePlan(id string, plan model.DiagnosisPlan) error {
+	return nil
+}
+
+// ── Audit Logs ──
+
+func (r *MemoryRepository) AddAuditLog(entry model.AuditLog) error {
+	_ = r.store.AddAuditLog(entry.ActorType, entry.ActorID, entry.Action, entry.ResourceType, entry.ResourceID, entry.Details)
+	return nil
+}
+
+func (r *MemoryRepository) ListAuditLogs(resourceType, resourceID string) ([]model.AuditLog, error) {
+	return r.store.ListAuditLogs(resourceType, resourceID), nil
+}
+
+// ── Incident Cases ──
+
+func (r *MemoryRepository) UpsertIncidentCase(planID string, c model.IncidentCase) (model.IncidentCase, error) {
+	plan := model.DiagnosisPlan{
+		ID:          planID,
+		Title:       c.Title,
+		TriggerType: c.TriggerType,
+	}
+	report := model.AnalysisReport{
+		FaultType:      c.FaultType,
+		PossibleCauses: c.PossibleCauses,
+		Suggestions:    c.Suggestions,
+		Confidence:     c.Confidence,
+	}
+	return r.store.UpsertIncidentCase(plan, report), nil
+}
+
+func (r *MemoryRepository) ListIncidentCases(filter model.IncidentCaseFilter) ([]model.IncidentCase, error) {
+	return r.store.ListIncidentCases(filter), nil
+}
+
+func (r *MemoryRepository) FindSimilarIncidentCases(description, triggerType, faultType string, limit int) ([]model.IncidentCase, error) {
+	return r.store.FindSimilarIncidentCases(description, triggerType, faultType, limit), nil
+}
+
+// ── Job YAMLs ──
+
+func (r *MemoryRepository) SaveJobYAML(jy model.JobYAML) (model.JobYAML, error) { return jy, nil }
+func (r *MemoryRepository) ListJobYAMLs() ([]model.JobYAML, error)              { return nil, nil }
+func (r *MemoryRepository) GetJobYAML(id string) (model.JobYAML, error)         { return model.JobYAML{}, nil }
+func (r *MemoryRepository) DeleteJobYAML(id string) error                       { return nil }
+
+// ── Worker Logs ──
+
+func (r *MemoryRepository) AddWorkerLog(entry model.WorkerLog) error {
+	return nil
+}
+
+func (r *MemoryRepository) ListWorkerLogs(workerID, jobID string, limit int) ([]model.WorkerLog, error) {
+	return nil, nil
+}
+
+// ── Managed Runtime Configs ──
+
+func (r *MemoryRepository) SaveManagedConfig(config model.ManagedConfig) (model.ManagedConfig, error) {
+	now := time.Now()
+	if config.ID == "" {
+		config.ID = fmt.Sprintf("cfg-%d", len(r.managedConfigs)+1)
+	}
+	if config.CreatedAt.IsZero() {
+		config.CreatedAt = now
+	}
+	config.UpdatedAt = now
+	r.managedConfigs[managedConfigKey(config.Kind, config.ID)] = config
+	return config, nil
+}
+
+func (r *MemoryRepository) ListManagedConfigs(kind string) ([]model.ManagedConfig, error) {
+	result := make([]model.ManagedConfig, 0, len(r.managedConfigs))
+	for _, cfg := range r.managedConfigs {
+		if kind != "" && cfg.Kind != kind {
+			continue
+		}
+		result = append(result, cfg)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) GetManagedConfig(kind, id string) (model.ManagedConfig, error) {
+	cfg, ok := r.managedConfigs[managedConfigKey(kind, id)]
+	if !ok {
+		return model.ManagedConfig{}, errNotFound("managed config", kind+"/"+id)
+	}
+	return cfg, nil
+}
+
+func (r *MemoryRepository) DeleteManagedConfig(kind, id string) error {
+	key := managedConfigKey(kind, id)
+	if _, ok := r.managedConfigs[key]; !ok {
+		return errNotFound("managed config", kind+"/"+id)
+	}
+	delete(r.managedConfigs, key)
+	return nil
+}
+
+func managedConfigKey(kind, id string) string {
+	return kind + "/" + id
+}
+
+// ── Metrics ──
+
+func (r *MemoryRepository) MetricsSnapshot() (model.MetricsSnapshot, error) {
+	return r.store.MetricsSnapshot(), nil
+}
+
+// ── Lifecycle ──
+
+func (r *MemoryRepository) Ping() error { return nil }
+
+func (r *MemoryRepository) Migrate() error { return nil }
+
+func (r *MemoryRepository) Close() error { return nil }
+
+// ── Errors ──
+
+func errNotFound(entity, id string) error {
+	return &repoError{msg: entity + " not found: " + id}
+}
+
+func errInvalidStatus(entity, status string) error {
+	return &repoError{msg: "cannot delete " + entity + " with status " + status}
+}
+
+type repoError struct {
+	msg string
+}
+
+func (e *repoError) Error() string { return e.msg }
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// Ensure time is used.
+var _ = time.Now

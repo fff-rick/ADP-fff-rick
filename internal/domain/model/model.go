@@ -19,6 +19,7 @@ type Worker struct {
 	Name            string       `json:"name"`
 	WorkerType      string       `json:"worker_type"`
 	Status          WorkerStatus `json:"status"`
+	HostInfo        HostInfo     `json:"host_info,omitempty"`
 	LastHeartbeatAt time.Time    `json:"last_heartbeat_at"`
 	CreatedAt       time.Time    `json:"created_at"`
 	UpdatedAt       time.Time    `json:"updated_at"`
@@ -46,28 +47,29 @@ const (
 )
 
 type Job struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	WorkerType       string         `json:"worker_type"`
-	Command          string         `json:"command"`
-	Status           JobStatus      `json:"status"`
-	RiskLevel        RiskLevel      `json:"risk_level,omitempty"`
-	ApprovalRequired bool           `json:"approval_required"`
-	ApprovalStatus   ApprovalStatus `json:"approval_status,omitempty"`
-	ApprovalComment  string         `json:"approval_comment,omitempty"`
-	ApprovedBy       string         `json:"approved_by,omitempty"`
-	ApprovedAt       *time.Time     `json:"approved_at,omitempty"`
-	RejectedBy       string         `json:"rejected_by,omitempty"`
-	RejectedAt       *time.Time     `json:"rejected_at,omitempty"`
-	TemplateCode     string         `json:"template_code,omitempty"`
-	SourceType       string         `json:"source_type,omitempty"`
-	SourceID         string         `json:"source_id,omitempty"`
-	AssignedWorkerID string         `json:"assigned_worker_id,omitempty"`
-	Output           string         `json:"output,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-	StartedAt        *time.Time     `json:"started_at,omitempty"`
-	FinishedAt       *time.Time     `json:"finished_at,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	WorkerType       string            `json:"worker_type"`
+	Command          string            `json:"command"`
+	Status           JobStatus         `json:"status"`
+	RiskLevel        RiskLevel         `json:"risk_level,omitempty"`
+	ApprovalRequired bool              `json:"approval_required"`
+	ApprovalStatus   ApprovalStatus    `json:"approval_status,omitempty"`
+	ApprovalComment  string            `json:"approval_comment,omitempty"`
+	ApprovedBy       string            `json:"approved_by,omitempty"`
+	ApprovedAt       *time.Time        `json:"approved_at,omitempty"`
+	RejectedBy       string            `json:"rejected_by,omitempty"`
+	RejectedAt       *time.Time        `json:"rejected_at,omitempty"`
+	TemplateCode     string            `json:"template_code,omitempty"`
+	Parameters       map[string]string `json:"parameters,omitempty"`
+	SourceType       string            `json:"source_type,omitempty"`
+	SourceID         string            `json:"source_id,omitempty"`
+	AssignedWorkerID string            `json:"assigned_worker_id,omitempty"`
+	Output           string            `json:"output,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	StartedAt        *time.Time        `json:"started_at,omitempty"`
+	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
 }
 
 // RiskLevel represents the risk classification of a task.
@@ -208,4 +210,46 @@ type MetricsSnapshot struct {
 	JobSuccessRate            float64 `json:"job_success_rate"`
 	JobFailureRate            float64 `json:"job_failure_rate"`
 	AvgScheduleLatencySeconds float64 `json:"avg_schedule_latency_seconds"`
+}
+
+// HostInfo represents host-level information collected by workers.
+type HostInfo struct {
+	Hostname     string  `json:"hostname"`
+	IPAddress    string  `json:"ip_address"`
+	CPUUsage     float64 `json:"cpu_usage"`
+	StorageUsage float64 `json:"storage_usage"`
+}
+
+// JobYAML represents a stored YAML job definition.
+type JobYAML struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	YAMLContent string    `json:"yaml_content"`
+	Source      string    `json:"source"` // "ai" | "manual"
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// WorkerLog represents a worker execution log entry.
+type WorkerLog struct {
+	ID        int64     `json:"id"`
+	WorkerID  string    `json:"worker_id"`
+	JobID     string    `json:"job_id"`
+	Command   string    `json:"command"`
+	Progress  string    `json:"progress"`
+	Result    string    `json:"result"`
+	Success   bool      `json:"success"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ManagedConfig stores runtime-managed YAML configuration.
+type ManagedConfig struct {
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Name        string    `json:"name"`
+	YAMLContent string    `json:"yaml_content"`
+	Active      bool      `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

@@ -7,6 +7,7 @@ import (
 	"adp/internal/domain/model"
 	"adp/internal/domain/policy"
 	"adp/internal/domain/template"
+	"adp/internal/infrastructure/llm"
 )
 
 func TestParseWithRules_MySQLBackup(t *testing.T) {
@@ -73,6 +74,38 @@ func TestParseWithRules_HTTPHealthCheck(t *testing.T) {
 	}
 }
 
+func TestParseWithRules_NginxMultiStepDiagnosis(t *testing.T) {
+	p := NewParser(nil, template.NewEngine(), policy.NewEngine())
+
+	intent, err := p.Parse(context.Background(), "帮我检查 nginx 是否正常运行，并查看错误日志")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if intent.Intent != "diagnose" {
+		t.Fatalf("intent = %s, want diagnose", intent.Intent)
+	}
+	if intent.TargetType != "nginx" {
+		t.Fatalf("target_type = %s, want nginx", intent.TargetType)
+	}
+	if intent.MatchedTemplate != "" {
+		t.Fatalf("matched_template = %s, want empty for multi-step diagnosis", intent.MatchedTemplate)
+	}
+}
+
+func TestParseWithLLMJSONIntent(t *testing.T) {
+	p := NewParser(staticLLMClient{
+		response: `{"intent":"diagnose","target_type":"nginx","risk_level":"low","parameters":{"ServiceType":"nginx"}}`,
+	}, template.NewEngine(), policy.NewEngine())
+
+	intent, err := p.Parse(context.Background(), "帮我检查 nginx 是否正常运行，并查看错误日志")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if intent.Intent != "diagnose" || intent.TargetType != "nginx" {
+		t.Fatalf("unexpected intent: %+v", intent)
+	}
+}
+
 func TestParseWithRules_UnrecognizedInput(t *testing.T) {
 	p := NewParser(nil, template.NewEngine(), policy.NewEngine())
 
@@ -111,4 +144,12 @@ func TestScheduleExtraction(t *testing.T) {
 			}
 		})
 	}
+}
+
+type staticLLMClient struct {
+	response string
+}
+
+func (c staticLLMClient) Chat(_ context.Context, _ []llm.Message) (string, error) {
+	return c.response, nil
 }

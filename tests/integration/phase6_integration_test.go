@@ -21,7 +21,7 @@ func TestPhase6Acceptance(t *testing.T) {
 		AdminPassword:     "admin123",
 		AuthSecret:        "secret",
 		WorkerSharedToken: "worker-secret",
-	})
+	}, nil, nil)
 	app := httptest.NewServer(srv.Handler())
 	defer app.Close()
 
@@ -54,14 +54,14 @@ func TestPhase6Acceptance(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("approve status = %d, want %d", status, http.StatusOK)
 		}
-		if approveResp.Status != model.JobStatusQueued {
-			t.Fatalf("approved status = %s, want queued", approveResp.Status)
+		if approveResp.Status != model.JobStatusPending {
+			t.Fatalf("approved status = %s, want pending", approveResp.Status)
 		}
 
 		worker := registerWorkerForIntegration(t, app.URL)
-		job := pollJobForIntegration(t, app.URL, worker.ID)
-		if job == nil || job.ID != runResp.Job.ID {
-			t.Fatalf("expected approved backup job to be assigned, got %+v", job)
+		job := dispatchJobForIntegration(t, app.URL, token, runResp.Job.ID, worker.ID)
+		if job.ID != runResp.Job.ID {
+			t.Fatalf("expected approved backup job to be dispatched, got %+v", job)
 		}
 
 		status = doWorkerJSON(t, app.Client(), http.MethodPost, fmt.Sprintf("%s/api/v1/workers/%s/jobs/%s/complete", app.URL, worker.ID, job.ID), map[string]any{
@@ -87,7 +87,7 @@ func TestPhase6Acceptance(t *testing.T) {
 		executePlanForIntegration(t, app.URL, token, planID)
 		plan := getPlanForIntegration(t, app.URL, token, planID)
 		worker := registerWorkerForIntegration(t, app.URL)
-		runDiagnosisJobs(t, app.URL, worker.ID, plan, map[string]workerCompletion{
+		runDiagnosisJobs(t, app.URL, token, worker.ID, plan, map[string]workerCompletion{
 			"check_process":     {Success: false, Output: ""},
 			"check_port":        {Success: false, Output: ""},
 			"read_log_tail":     {Success: true, Output: "permission denied"},
@@ -114,7 +114,7 @@ func TestPhase6Acceptance(t *testing.T) {
 		executePlanForIntegration(t, app.URL, token, planID)
 		plan := getPlanForIntegration(t, app.URL, token, planID)
 		worker := registerWorkerForIntegration(t, app.URL)
-		runDiagnosisJobs(t, app.URL, worker.ID, plan, map[string]workerCompletion{
+		runDiagnosisJobs(t, app.URL, token, worker.ID, plan, map[string]workerCompletion{
 			"redis_ping":        {Success: true, Output: "PONG"},
 			"redis_info":        {Success: true, Output: "used_memory:104857600"},
 			"redis_slowlog_get": {Success: true, Output: "1) 1\n2) GET user:1"},
@@ -181,17 +181,22 @@ func registerWorkerForIntegration(t *testing.T, baseURL string) model.Worker {
 	return worker
 }
 
-func pollJobForIntegration(t *testing.T, baseURL, workerID string) *model.Job {
+func dispatchJobForIntegration(t *testing.T, baseURL, token, jobID, workerID string) model.Job {
 	t.Helper()
 
 	resp := struct {
-		Job *model.Job `json:"job"`
+		Jobs []model.Job `json:"jobs"`
 	}{}
-	status := doWorkerJSON(t, http.DefaultClient, http.MethodPost, fmt.Sprintf("%s/api/v1/workers/%s/poll", baseURL, workerID), map[string]string{}, &resp)
+	status := doUserJSON(t, http.DefaultClient, http.MethodPost, fmt.Sprintf("%s/api/v1/jobs/%s/dispatch", baseURL, jobID), token, map[string]any{
+		"worker_ids": []string{workerID},
+	}, &resp)
 	if status != http.StatusOK {
-		t.Fatalf("worker poll status = %d, want %d", status, http.StatusOK)
+		t.Fatalf("dispatch job status = %d, want %d", status, http.StatusOK)
 	}
-	return resp.Job
+	if len(resp.Jobs) != 1 {
+		t.Fatalf("expected 1 dispatched job, got %d", len(resp.Jobs))
+	}
+	return resp.Jobs[0]
 }
 
 func createPlanForIntegration(t *testing.T, baseURL, token, description string) string {
@@ -240,7 +245,7 @@ func analyzePlanForIntegration(t *testing.T, baseURL, token, planID string) mode
 	return report
 }
 
-func runDiagnosisJobs(t *testing.T, baseURL, workerID string, plan model.DiagnosisPlan, completions map[string]workerCompletion) {
+func runDiagnosisJobs(t *testing.T, baseURL, token, workerID string, plan model.DiagnosisPlan, completions map[string]workerCompletion) {
 	t.Helper()
 
 	byJobID := make(map[string]workerCompletion, len(plan.Steps))
@@ -252,25 +257,25 @@ func runDiagnosisJobs(t *testing.T, baseURL, workerID string, plan model.Diagnos
 		byJobID[step.JobID] = completion
 	}
 
-	for range plan.Steps {
-		job := pollJobForIntegration(t, baseURL, workerID)
-		if job == nil {
-			t.Fatal("expected diagnosis job to be assigned")
+	for _, step := range plan.Steps {
+		job := dispatchJobForIntegration(t, baseURL, token, step.JobID, workerID)
+		if job.ID != step.JobID {
+			t.Fatalf("expected diagnosis job %s to be dispatched, got %s", step.JobID, job.ID)
 		}
 
-		completion, ok := byJobID[job.ID]
+		completion, ok := byJobID[step.JobID]
 		if !ok {
-			t.Fatalf("unexpected diagnosis job id %s", job.ID)
+			t.Fatalf("unexpected diagnosis job id %s", step.JobID)
 		}
 
-		status := doWorkerJSON(t, http.DefaultClient, http.MethodPost, fmt.Sprintf("%s/api/v1/workers/%s/jobs/%s/complete", baseURL, workerID, job.ID), map[string]any{
+		status := doWorkerJSON(t, http.DefaultClient, http.MethodPost, fmt.Sprintf("%s/api/v1/workers/%s/jobs/%s/complete", baseURL, workerID, step.JobID), map[string]any{
 			"success": completion.Success,
 			"output":  completion.Output,
 		}, nil)
 		if status != http.StatusOK {
 			t.Fatalf("complete diagnosis job status = %d, want %d", status, http.StatusOK)
 		}
-		delete(byJobID, job.ID)
+		delete(byJobID, step.JobID)
 	}
 
 	if len(byJobID) != 0 {

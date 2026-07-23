@@ -1,7 +1,33 @@
-FROM alpine:3.20
+ARG GO_VERSION=1.25.0
 
-RUN apk add --no-cache ca-certificates bash coreutils curl grep iproute2 net-tools procps redis
+FROM golang:${GO_VERSION}-alpine AS build
 
-COPY output/adp-worker /usr/local/bin/adp-worker
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/adp-worker ./cmd/worker
+
+FROM alpine:3.22
+
+RUN apk add --no-cache \
+    bash \
+    bind-tools \
+    ca-certificates \
+    coreutils \
+    curl \
+    grep \
+    iproute2 \
+    mysql-client \
+    net-tools \
+    procps \
+    redis \
+    tzdata
+
+COPY --from=build /out/adp-worker /usr/local/bin/adp-worker
 
 ENTRYPOINT ["adp-worker"]
+CMD ["run"]

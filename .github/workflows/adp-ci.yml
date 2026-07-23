@@ -1,0 +1,145 @@
+name: ADP CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  SERVER_IMAGE: adp-server
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+          args: --config=.golangci.yml
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  build-and-publish:
+    needs:
+      - lint
+      - test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image metadata
+        id: image
+        run: |
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          repository="ghcr.io/${owner}/${SERVER_IMAGE}"
+          tag="${GITHUB_SHA::12}"
+          echo "repository=${repository}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "IMAGE_REPOSITORY=${repository}" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server
+          push: true
+          tags: |
+            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+
+      - name: Checkout GitOps repo
+        env:
+          GITOPS_REPO_SSH: ${{ vars.GITOPS_REPO_SSH }}
+          GITOPS_SSH_KEY: ${{ secrets.GITOPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$GITOPS_SSH_KEY" > ~/.ssh/gitops
+          chmod 600 ~/.ssh/gitops
+          ssh-keyscan -H gitee.com e.coding.net coding.net github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/gitops" git clone --branch main "$GITOPS_REPO_SSH" gitops
+
+      - name: Update GitOps image tags
+        working-directory: gitops/deploy/k8s/overlays/prod
+        env:
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("kustomization.yaml")
+          server = os.environ["IMAGE_REPOSITORY"]
+          tag = os.environ["IMAGE_TAG"]
+
+          lines = path.read_text().splitlines()
+          active = ""
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped.startswith("- name: ") and stripped.endswith("/adp-server"):
+                  active = "server"
+              elif stripped.startswith("- name: "):
+                  active = ""
+              elif active == "server" and stripped.startswith("newName: "):
+                  lines[i] = f"    newName: {server}"
+              elif active == "server" and stripped.startswith("newTag: "):
+                  lines[i] = f"    newTag: {tag}"
+
+          path.write_text("\n".join(lines) + "\n")
+          PY
+
+      - name: Commit GitOps change
+        working-directory: gitops
+        run: |
+          git config user.name "adp-ci"
+          git config user.email "adp-ci@example.local"
+          git add deploy/k8s/overlays/prod/kustomization.yaml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "deploy: adp ${IMAGE_TAG}"
+          git push origin main
