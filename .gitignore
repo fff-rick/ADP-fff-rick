@@ -15,6 +15,7 @@ coverage/
 .env.*
 *.env
 configs/worker/services.cnf
+configs/server/adp.yaml
 /secrets/prod/
 
 # IDE

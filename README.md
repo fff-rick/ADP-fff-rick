@@ -134,9 +134,10 @@ ADP/
 go run ./cmd/server serve
 ```
 
-服务端默认会尝试读取 `configs/server/adp.yaml`。也可以显式指定：
+服务端默认会尝试读取本地的 `configs/server/adp.yaml`。仓库仅提供示例文件，首次本地运行可复制：
 
 ```bash
+cp configs/server/adp.yaml.example configs/server/adp.yaml
 go run ./cmd/server serve --config configs/server/adp.yaml
 ```
 
@@ -167,7 +168,7 @@ Worker 会连接 `configs/worker/adp.yaml` 中的 `grpc_server_addr`，通过 gR
 4. 配置参考：
 
 - 配置目录说明见 [configs/README.md](./configs/README.md)
-- 服务端配置见 [configs/server/adp.yaml](./configs/server/adp.yaml)
+- 服务端本地配置示例见 [configs/server/adp.yaml.example](./configs/server/adp.yaml.example)
 - Worker 配置见 [configs/worker/adp.yaml](./configs/worker/adp.yaml)
 - AI 上下文配置见 [configs/ai/ai_context.yaml](./configs/ai/ai_context.yaml)
 - 环境变量示例见 [configs/env/app.env.example](./configs/env/app.env.example)
