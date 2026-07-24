@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - security.yaml
   - postgres.yaml
   - server-configmap.yaml
   - ai-context-configmap.yaml

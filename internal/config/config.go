@@ -28,4 +28,5 @@ type WorkerConfig struct {
 	ExecTimeout         time.Duration
 	HostCollectInterval time.Duration
 	LogToDB             bool
+	ServicesConfigPath  string
 }

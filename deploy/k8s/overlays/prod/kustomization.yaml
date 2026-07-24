@@ -5,11 +5,13 @@ namespace: adp
 
 resources:
   - ../../base
+  - secrets/sealed-postgres-secret.yaml
+  - secrets/sealed-adp-server-secret.yaml
 
 images:
   - name: ghcr.io/fff-rick/adp-server
     newName: ghcr.io/fff-rick/adp-server
-    newTag: 7bbb4036eb34
+    newTag: v1.0
 
 patches:
   - path: server-config.patch.yaml

@@ -99,6 +99,14 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 	if s.aiContext != nil {
 		s.aiContext.FillDefaults(params, tmplCode)
 	}
+	if err := model.ValidateNoInlineSecrets(params); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := model.ValidateServiceProfile(tmplCode, params); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	// 4. Render command from template.
 	tmpl, cmd, err := s.templateEng.Render(tmplCode, params)

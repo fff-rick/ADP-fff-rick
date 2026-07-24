@@ -1455,26 +1455,36 @@ scripts/remote_pr_deploy.sh               -- 支持远程本地构建后导入 c
 
 ## 远程服务器环境配置（手动一次）
 
-1. **安装 SealedSecrets Controller**
+1. **安装 Sealed Secrets Controller 并导出集群公钥**
    ```bash
    kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.3/controller.yaml
+   kubeseal --fetch-cert > sealed-secrets-cert.pem
    ```
-   导出公钥：`kubeseal --fetch-cert > sealed-secrets-cert.pem`
+   `sealed-secrets-cert.pem` 仅为公钥，可用于 CI/开发机加密；私钥只保留在集群 Controller 中。生产 Secret 以 `SealedSecret` 提交 Git，明文 `.env`、PAT 和 Kubeconfig 不提交。
 
-2. **安装 ArgoCD**
+2. **创建命名空间并生成加密 Secret**
+   ```bash
+   kubectl create namespace adp --dry-run=client -o yaml | kubectl apply -f -
+   kubectl -n adp create secret generic postgres-secret \
+     --from-env-file=secrets/prod/postgres.env --dry-run=client -o yaml \
+     | kubeseal --cert sealed-secrets-cert.pem --format yaml \
+     > deploy/k8s/overlays/prod/secrets/sealed-postgres-secret.yaml
+   ```
+   同样生成 `adp-server-secret` 和 `ghcr-pull-secret` 的 SealedSecret，并在 `deploy/k8s/overlays/prod/kustomization.yaml` 的 `resources` 引用它们。密文与 `adp` 命名空间、Secret 名称绑定；公钥或 Controller 密钥轮换后必须重新加密。
+
+3. **配置每台 Worker 的统一服务文件**
+   ```bash
+   sudo install -o root -g adpworker -m 0640 configs/worker/services.cnf.example /etc/adp/services.cnf
+   sudoedit /etc/adp/services.cnf
+   ```
+   该文件按 `[mysql_prod]`、`[redis_prod]`、`[nginx_prod]`、`[adp_http]` 等 Profile 管理主机、端口、用户名、密码、日志路径等配置。Worker 启动参数使用 `--services-config=/etc/adp/services.cnf`；任务仅提交 `ServiceProfile` 名称，不能传递密码、连接串或任意文件路径。
+
+4. **安装 Argo CD 与 TLS 入口**
    ```bash
    kubectl create namespace argocd
    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
    ```
-   暴露 UI：`kubectl patch svc argocd-server -n argocd -p '...'` (NodePort 30080)
-
-3. **创建 ghcr.io 拉取密钥**
-   ```bash
-   kubectl create secret docker-registry ghcr-secret -n adp \
-     --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT>
-   ```
-
-4. **创建 adp 命名空间**：`kubectl create namespace adp`
+   ADP Service 为 ClusterIP；外部访问必须经单独配置的 TLS Ingress，并在 NetworkPolicy 中允许 Ingress Controller 命名空间访问 `adp-server:8080`。
 
 ## 改造内容
 
@@ -1623,3 +1633,28 @@ deploy/k8s/manifests/worker-deployment.yaml     — 旧裸 YAML
 3. 在服务器上 `kubectl apply -f deploy/k8s/argocd/adp-app.yaml`
 4. 配置 GitHub Secrets：`DEPLOY_HOST`、`ADP_DEPLOY_USER`、`ADP_DEPLOY_SSH_KEY`、`ADP_DEPLOY_PORT`
 5. 确保 GitHub 仓库 Settings → Actions → Read and write permissions 已启用
+
+---
+
+# 生产敏感数据治理修正日志
+
+日期：2026-07-24
+范围：GitOps 发布清单、服务/Worker 启动配置、任务执行参数与 Web UI。
+
+## 已修正
+
+1. 删除已被 Git 跟踪且包含明文 PostgreSQL 默认口令的 `deploy/k8s/postgres.yaml`；生产 PostgreSQL 继续只引用运行时 `postgres-secret`。
+2. 清除 Server 和 Worker 的认证默认值：管理员密码、JWT 签名密钥和 Worker token 现在默认为空；Server 启动时强制检查三项，`ADP_ENV=production` 时同时强制检查 `ADP_DB_DSN`。
+3. 配置样例改为 Secret Manager 占位符，登录页面不再预填管理员密码。
+4. 禁止任务 API 与 YAML Job 接收内联 `password`、`secret`、`token`、`api_key` 或私钥类参数，防止其被写入 `jobs.parameters`、API 响应、Worker 消息或日志。服务任务改为只提交 `ServiceProfile`，Worker 从单一、受权限保护的 `/etc/adp/services.cnf` 读取匹配类型的配置；MySQL 临时凭据文件与 Redis 认证环境仅在 Worker 进程内使用，不进入命令行。
+5. Server Service 由 NodePort 改为 ClusterIP；生产外部访问必须经独立的 TLS Ingress/反向代理和来源限制配置提供。
+6. 新增专用 `adp-server` ServiceAccount、关闭 Pod 的 ServiceAccount token 自动挂载，并加入非 root、只读根文件系统、禁止提权和移除 Linux capabilities 的容器安全上下文。
+7. 新增命名空间默认拒绝入站、ADP Server 与 PostgreSQL 最小入站规则的 NetworkPolicy。
+8. 远程 Worker 部署默认关闭；启用时仅接受 `/etc/adp/ssh/` 下预置的私钥文件，拒绝 API 传入 SSH 密码。部署过程将 Worker token 上传为权限 `0600` 的文件并以 `--worker-token-file` 读取，避免出现在进程参数或应用日志中。
+
+## 发布前必须执行的人工步骤
+
+1. 轮换当前生产 PostgreSQL 密码、管理员密码、JWT 密钥、Worker token、LLM API Key、GHCR 凭据及长期 ServiceAccount token；本次没有读取或改写这些值。
+2. 以 SOPS/External Secrets（或现有 Sealed Secrets）将运行时 Secret 纳入受审计流程；不得提交可解密明文。
+3. 在 Ingress/反向代理配置 TLS、认证边界与 IP allowlist 后，才允许公开 Web UI；确认集群 CNI 已启用 NetworkPolicy 实施。
+4. Worker 侧创建 `/etc/adp/services.cnf` 并设置为仅 Worker 可读；真实配置不进入 Git、任务参数或日志。

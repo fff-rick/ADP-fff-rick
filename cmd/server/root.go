@@ -54,9 +54,9 @@ func init() {
 	serveCmd.Flags().String("worker-grpc-addr", ":9090", "Worker gRPC listen address")
 	serveCmd.Flags().String("db-dsn", "", "PostgreSQL DSN (e.g., postgres://user:pass@localhost:5432/adp?sslmode=disable)")
 	serveCmd.Flags().String("admin-username", "admin", "Initial admin username")
-	serveCmd.Flags().String("admin-password", "admin123", "Initial admin password")
-	serveCmd.Flags().String("auth-secret", "adp-dev-secret", "JWT signing secret")
-	serveCmd.Flags().String("worker-token", "adp-worker-secret", "Worker shared secret token")
+	serveCmd.Flags().String("admin-password", "", "Initial admin password (required)")
+	serveCmd.Flags().String("auth-secret", "", "JWT signing secret (required)")
+	serveCmd.Flags().String("worker-token", "", "Worker shared secret token (required)")
 	serveCmd.Flags().String("llm-base-url", "", "LLM API base URL (optional)")
 	serveCmd.Flags().String("llm-api-key", "", "LLM API key (optional)")
 	serveCmd.Flags().String("llm-model", "gpt-4", "LLM model name")
@@ -110,13 +110,15 @@ func init() {
 	}
 	workerRunCmd.Flags().String("server-url", "http://127.0.0.1:8080", "ADP server URL")
 	workerRunCmd.Flags().String("grpc-server-addr", "127.0.0.1:9090", "ADP worker gRPC server address")
-	workerRunCmd.Flags().String("worker-token", "adp-worker-secret", "Shared worker token")
+	workerRunCmd.Flags().String("worker-token", "", "Worker shared secret token (required)")
+	workerRunCmd.Flags().String("worker-token-file", "", "Path to a 0600 file containing the worker token")
 	workerRunCmd.Flags().String("worker-name", "worker-1", "Worker name")
 	workerRunCmd.Flags().String("worker-type", "shell", "Worker type")
 	workerRunCmd.Flags().Duration("poll-interval", 5*time.Second, "Job poll interval")
 	workerRunCmd.Flags().Duration("exec-timeout", 30*time.Second, "Command execution timeout")
 	workerRunCmd.Flags().Duration("host-collect-interval", 60*time.Second, "Host info collection interval")
 	workerRunCmd.Flags().Bool("log-to-db", false, "Send execution logs to server database")
+	workerRunCmd.Flags().String("services-config", config.DefaultServicesConfigPath, "Worker-local services.cnf path")
 
 	workerCmd.AddCommand(workerRunCmd)
 	rootCmd.AddCommand(workerCmd)
@@ -126,18 +128,31 @@ func runWorkerAsSubcommand(cmd *cobra.Command, _ []string) error {
 	serverURL, _ := cmd.Flags().GetString("server-url")
 	grpcServerAddr, _ := cmd.Flags().GetString("grpc-server-addr")
 	workerToken, _ := cmd.Flags().GetString("worker-token")
+	workerTokenFile, _ := cmd.Flags().GetString("worker-token-file")
+	if strings.TrimSpace(workerTokenFile) != "" {
+		contents, err := os.ReadFile(workerTokenFile)
+		if err != nil {
+			return fmt.Errorf("read worker token file: %w", err)
+		}
+		workerToken = strings.TrimSpace(string(contents))
+	}
+	if unsafeSecretValue(workerToken) {
+		return errors.New("worker-token is required; supply it through a protected runtime secret")
+	}
 	workerName, _ := cmd.Flags().GetString("worker-name")
 	workerType, _ := cmd.Flags().GetString("worker-type")
 	pollInterval, _ := cmd.Flags().GetDuration("poll-interval")
 	execTimeout, _ := cmd.Flags().GetDuration("exec-timeout")
 	hostCollectInterval, _ := cmd.Flags().GetDuration("host-collect-interval")
 	logToDB, _ := cmd.Flags().GetBool("log-to-db")
+	servicesConfig, _ := cmd.Flags().GetString("services-config")
 
 	client := worker.NewClient(serverURL, workerToken, workerName, workerType, pollInterval)
 	client.SetGRPCServerAddr(grpcServerAddr)
 	client.SetExecTimeout(execTimeout)
 	client.SetHostCollectInterval(hostCollectInterval)
 	client.SetLogToDB(logToDB)
+	client.SetServicesConfigPath(servicesConfig)
 
 	return client.Run()
 }
@@ -182,6 +197,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		LLMAPIKey:         viper.GetString("llm.api_key"),
 		LLMModel:          viper.GetString("llm.model"),
 		AIContextPath:     viper.GetString("ai_context"),
+	}
+	if err := validateRuntimeConfig(cfg); err != nil {
+		return err
 	}
 
 	// Initialize repository.
@@ -262,6 +280,31 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	grpcServer.GracefulStop()
 	return svr.Shutdown(ctx)
+}
+
+func validateRuntimeConfig(cfg config.ServerConfig) error {
+	missing := make([]string, 0, 3)
+	if unsafeSecretValue(cfg.AdminPassword) {
+		missing = append(missing, "ADP_AUTH_ADMIN_PASSWORD")
+	}
+	if unsafeSecretValue(cfg.AuthSecret) {
+		missing = append(missing, "ADP_AUTH_SECRET")
+	}
+	if unsafeSecretValue(cfg.WorkerSharedToken) {
+		missing = append(missing, "ADP_AUTH_WORKER_TOKEN")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("required runtime secrets are missing: %s", strings.Join(missing, ", "))
+	}
+	if strings.EqualFold(os.Getenv("ADP_ENV"), "production") && strings.TrimSpace(cfg.DBDSN) == "" {
+		return errors.New("ADP_DB_DSN is required when ADP_ENV=production")
+	}
+	return nil
+}
+
+func unsafeSecretValue(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "" || strings.Contains(value, "<set-in-secret-manager>") || strings.Contains(value, "change-me")
 }
 
 // sqlDB is imported to satisfy the interface check; the actual DB handle is inside PostgresRepository.

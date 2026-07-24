@@ -30,24 +30,28 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().String("server-url", "http://127.0.0.1:8080", "ADP server URL")
 	runCmd.Flags().String("grpc-server-addr", "127.0.0.1:9090", "ADP worker gRPC server address")
-	runCmd.Flags().String("worker-token", "adp-worker-secret", "Shared worker token")
+	runCmd.Flags().String("worker-token", "", "Worker shared secret token (required)")
+	runCmd.Flags().String("worker-token-file", "", "Path to a 0600 file containing the worker token")
 	runCmd.Flags().String("worker-name", "worker-1", "Worker name")
 	runCmd.Flags().String("worker-type", "shell", "Worker type")
 	runCmd.Flags().Duration("poll-interval", 5*time.Second, "Job poll interval")
 	runCmd.Flags().Duration("exec-timeout", 30*time.Second, "Command execution timeout")
 	runCmd.Flags().Duration("host-collect-interval", 60*time.Second, "Host info collection interval")
 	runCmd.Flags().Bool("log-to-db", false, "Send execution logs to server database")
+	runCmd.Flags().String("services-config", config.DefaultServicesConfigPath, "Worker-local services.cnf path")
 	runCmd.Flags().String("config", "", "Path to YAML config file")
 
 	_ = viper.BindPFlag("server_url", runCmd.Flags().Lookup("server-url"))
 	_ = viper.BindPFlag("grpc_server_addr", runCmd.Flags().Lookup("grpc-server-addr"))
 	_ = viper.BindPFlag("worker_token", runCmd.Flags().Lookup("worker-token"))
+	_ = viper.BindPFlag("worker_token_file", runCmd.Flags().Lookup("worker-token-file"))
 	_ = viper.BindPFlag("worker_name", runCmd.Flags().Lookup("worker-name"))
 	_ = viper.BindPFlag("worker_type", runCmd.Flags().Lookup("worker-type"))
 	_ = viper.BindPFlag("poll_interval", runCmd.Flags().Lookup("poll-interval"))
 	_ = viper.BindPFlag("exec_timeout", runCmd.Flags().Lookup("exec-timeout"))
 	_ = viper.BindPFlag("host_collect_interval", runCmd.Flags().Lookup("host-collect-interval"))
 	_ = viper.BindPFlag("log_to_db", runCmd.Flags().Lookup("log-to-db"))
+	_ = viper.BindPFlag("services_config", runCmd.Flags().Lookup("services-config"))
 
 	viper.SetEnvPrefix("ADP")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
@@ -95,6 +99,17 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 		ExecTimeout:         viper.GetDuration("exec_timeout"),
 		HostCollectInterval: viper.GetDuration("host_collect_interval"),
 		LogToDB:             viper.GetBool("log_to_db"),
+		ServicesConfigPath:  viper.GetString("services_config"),
+	}
+	if tokenFile := strings.TrimSpace(viper.GetString("worker_token_file")); tokenFile != "" {
+		contents, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return fmt.Errorf("read worker token file: %w", err)
+		}
+		cfg.WorkerToken = strings.TrimSpace(string(contents))
+	}
+	if unsafeWorkerToken(cfg.WorkerToken) {
+		return errors.New("ADP_WORKER_TOKEN is required; supply it through a protected runtime secret")
 	}
 
 	client := worker.NewClient(cfg.ServerURL, cfg.WorkerToken, cfg.Name, cfg.Type, cfg.PollInterval)
@@ -102,9 +117,15 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	client.SetExecTimeout(cfg.ExecTimeout)
 	client.SetHostCollectInterval(cfg.HostCollectInterval)
 	client.SetLogToDB(cfg.LogToDB)
+	client.SetServicesConfigPath(cfg.ServicesConfigPath)
 
 	if err := client.Run(); err != nil {
 		log.Fatalf("worker failed: %v", err)
 	}
 	return nil
+}
+
+func unsafeWorkerToken(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "" || strings.Contains(value, "<set-in-secret-manager>") || strings.Contains(value, "change-me")
 }

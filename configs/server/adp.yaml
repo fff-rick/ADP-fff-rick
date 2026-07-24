@@ -8,9 +8,10 @@ db:
 
 auth:
   admin_username: "admin"
-  admin_password: "admin123"
-  secret: "adp-dev-secret"
-  worker_token: "adp-worker-secret"
+  # Inject the following values from the runtime Secret; never commit them here.
+  admin_password: ""
+  secret: ""
+  worker_token: ""
 
 llm:
   base_url: "https://api.deepseek.com"

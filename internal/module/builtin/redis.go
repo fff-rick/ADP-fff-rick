@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -22,15 +23,13 @@ func (m *RedisPing) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *RedisPing) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "Host", Description: "Redis 主机", Required: false, Default: "127.0.0.1"}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Redis Profile", Required: true}}
 }
 func (m *RedisPing) Check(_ module.ExecContext) (module.CheckResult, error) {
 	return module.CheckResult{NeedsChange: true, CurrentState: "will check Redis connectivity"}, nil
 }
 func (m *RedisPing) Execute(ctx module.ExecContext) (module.Result, error) {
-	host := paramDefault(ctx.Params, "Host", "127.0.0.1")
-	port := paramDefault(ctx.Params, "Port", "6379")
-	out, err := exec.Command("redis-cli", "-h", host, "-p", port, "PING").CombinedOutput()
+	out, err := runRedis(ctx, "PING")
 	if err != nil {
 		return module.Result{Success: false, Output: string(out)}, nil
 	}
@@ -39,7 +38,7 @@ func (m *RedisPing) Execute(ctx module.ExecContext) (module.Result, error) {
 	return module.Result{Success: success, Output: result, Changed: false}, nil
 }
 func (m *RedisPing) DryRun(ctx module.ExecContext) (module.Result, error) {
-	return module.Result{Success: true, Output: fmt.Sprintf("would redis-cli -h %s PING", paramDefault(ctx.Params, "Host", "127.0.0.1")), Changed: false}, nil
+	return module.Result{Success: true, Output: "would run redis-cli using Worker-local ServiceProfile", Changed: false}, nil
 }
 
 // ── redis_info ──
@@ -55,16 +54,14 @@ func (m *RedisInfo) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *RedisInfo) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "Host", Description: "Redis 主机", Required: false, Default: "127.0.0.1"}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Redis Profile", Required: true}}
 }
 func (m *RedisInfo) Check(_ module.ExecContext) (module.CheckResult, error) {
 	return module.CheckResult{NeedsChange: true, CurrentState: "will collect Redis INFO"}, nil
 }
 func (m *RedisInfo) Execute(ctx module.ExecContext) (module.Result, error) {
-	host := paramDefault(ctx.Params, "Host", "127.0.0.1")
-	port := paramDefault(ctx.Params, "Port", "6379")
 	section := paramDefault(ctx.Params, "Section", "memory")
-	out, err := exec.Command("redis-cli", "-h", host, "-p", port, "INFO", section).CombinedOutput()
+	out, err := runRedis(ctx, "INFO", section)
 	if err != nil {
 		return module.Result{Success: false, Output: string(out)}, nil
 	}
@@ -88,7 +85,7 @@ func (m *RedisSlowlogGet) RiskProfile() module.RiskProfile {
 }
 func (m *RedisSlowlogGet) Parameters() []module.ParamDef {
 	return []module.ParamDef{
-		{Name: "Host", Description: "Redis 主机", Required: false, Default: "127.0.0.1"},
+		{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Redis Profile", Required: true},
 		{Name: "Count", Description: "获取条数", Required: false, Default: "10"},
 	}
 }
@@ -96,10 +93,8 @@ func (m *RedisSlowlogGet) Check(_ module.ExecContext) (module.CheckResult, error
 	return module.CheckResult{NeedsChange: true, CurrentState: "will fetch Redis slowlog"}, nil
 }
 func (m *RedisSlowlogGet) Execute(ctx module.ExecContext) (module.Result, error) {
-	host := paramDefault(ctx.Params, "Host", "127.0.0.1")
-	port := paramDefault(ctx.Params, "Port", "6379")
 	count := paramDefault(ctx.Params, "Count", "10")
-	out, err := exec.Command("redis-cli", "-h", host, "-p", port, "SLOWLOG", "GET", count).CombinedOutput()
+	out, err := runRedis(ctx, "SLOWLOG", "GET", count)
 	if err != nil {
 		return module.Result{Success: false, Output: string(out)}, nil
 	}
@@ -108,7 +103,7 @@ func (m *RedisSlowlogGet) Execute(ctx module.ExecContext) (module.Result, error)
 	return module.Result{Success: true, Output: result, Changed: false, Facts: map[string]string{"has_slowlog": fmt.Sprintf("%t", hasEntries)}}, nil
 }
 func (m *RedisSlowlogGet) DryRun(ctx module.ExecContext) (module.Result, error) {
-	return module.Result{Success: true, Output: fmt.Sprintf("would redis-cli SLOWLOG GET %s", paramDefault(ctx.Params, "Count", "10")), Changed: false}, nil
+	return module.Result{Success: true, Output: fmt.Sprintf("would run redis-cli SLOWLOG GET %s using Worker-local ServiceProfile", paramDefault(ctx.Params, "Count", "10")), Changed: false}, nil
 }
 
 // ── redis_client_list ──
@@ -124,15 +119,13 @@ func (m *RedisClientList) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *RedisClientList) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "Host", Description: "Redis 主机", Required: false, Default: "127.0.0.1"}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Redis Profile", Required: true}}
 }
 func (m *RedisClientList) Check(_ module.ExecContext) (module.CheckResult, error) {
 	return module.CheckResult{NeedsChange: true, CurrentState: "will fetch Redis client list"}, nil
 }
 func (m *RedisClientList) Execute(ctx module.ExecContext) (module.Result, error) {
-	host := paramDefault(ctx.Params, "Host", "127.0.0.1")
-	port := paramDefault(ctx.Params, "Port", "6379")
-	out, err := exec.Command("redis-cli", "-h", host, "-p", port, "CLIENT", "LIST").CombinedOutput()
+	out, err := runRedis(ctx, "CLIENT", "LIST")
 	if err != nil {
 		return module.Result{Success: false, Output: string(out)}, nil
 	}
@@ -140,5 +133,17 @@ func (m *RedisClientList) Execute(ctx module.ExecContext) (module.Result, error)
 	return module.Result{Success: true, Output: string(out), Changed: false, Facts: map[string]string{"client_count": fmt.Sprintf("%d", len(lines))}}, nil
 }
 func (m *RedisClientList) DryRun(ctx module.ExecContext) (module.Result, error) {
-	return module.Result{Success: true, Output: fmt.Sprintf("would redis-cli -h %s CLIENT LIST", paramDefault(ctx.Params, "Host", "127.0.0.1")), Changed: false}, nil
+	return module.Result{Success: true, Output: "would run redis-cli CLIENT LIST using Worker-local ServiceProfile", Changed: false}, nil
+}
+
+func runRedis(ctx module.ExecContext, args ...string) ([]byte, error) {
+	if ctx.Service == nil || ctx.Service.Type != "redis" {
+		return nil, fmt.Errorf("redis task requires a Worker-local redis ServiceProfile")
+	}
+	command := exec.Command("redis-cli", append([]string{"-h", ctx.Service.Host, "-p", ctx.Service.Port}, args...)...)
+	command.Env = os.Environ()
+	if ctx.Service.Password != "" {
+		command.Env = append(command.Env, "REDISCLI_AUTH="+ctx.Service.Password)
+	}
+	return command.CombinedOutput()
 }

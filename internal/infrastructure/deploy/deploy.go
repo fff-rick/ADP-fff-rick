@@ -38,11 +38,18 @@ func DeployWorker(target Target, spec WorkerSpec, localBinary string) error {
 	defer func() { _ = client.Close() }()
 
 	remotePath := "/tmp/adp-worker"
+	tokenPath := "/tmp/adp-worker.token"
 
 	// 1. Upload binary.
 	log.Printf("deploy: uploading binary to %s@%s:%s", target.User, target.Host, remotePath)
 	if err := uploadFile(client, localBinary, remotePath); err != nil {
 		return fmt.Errorf("upload binary: %w", err)
+	}
+	if err := uploadBytes(client, []byte(spec.WorkerToken+"\n"), tokenPath); err != nil {
+		return fmt.Errorf("upload worker token: %w", err)
+	}
+	if err := runCmd(client, fmt.Sprintf("chmod 600 %s", tokenPath)); err != nil {
+		return fmt.Errorf("protect worker token file: %w", err)
 	}
 
 	// 2. Make executable.
@@ -62,10 +69,10 @@ func DeployWorker(target Target, spec WorkerSpec, localBinary string) error {
 		logToDBFlag = " --log-to-db"
 	}
 	startCmd := fmt.Sprintf(
-		"nohup %s worker run --server-url=%s --worker-token=%s --worker-name=%s --worker-type=%s%s > /tmp/adp-worker.log 2>&1 &",
-		remotePath, spec.ServerURL, spec.WorkerToken, spec.WorkerName, spec.WorkerType, logToDBFlag,
+		"nohup %s worker run --server-url=%s --worker-token-file=%s --worker-name=%s --worker-type=%s%s > /tmp/adp-worker.log 2>&1 &",
+		remotePath, spec.ServerURL, tokenPath, spec.WorkerName, spec.WorkerType, logToDBFlag,
 	)
-	log.Printf("deploy: starting worker on %s: %s", target.Host, startCmd)
+	log.Printf("deploy: starting worker %s on %s", spec.WorkerName, target.Host)
 	if err := runCmd(client, startCmd); err != nil {
 		return fmt.Errorf("start worker: %w", err)
 	}
@@ -117,6 +124,10 @@ func uploadFile(client *ssh.Client, localPath, remotePath string) error {
 		return err
 	}
 
+	return uploadBytes(client, file, remotePath)
+}
+
+func uploadBytes(client *ssh.Client, file []byte, remotePath string) error {
 	session, err := client.NewSession()
 	if err != nil {
 		return err
