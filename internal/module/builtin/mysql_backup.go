@@ -42,7 +42,7 @@ func (m *MySQLBackup) Execute(ctx module.ExecContext) (module.Result, error) {
 	if err != nil {
 		return module.Result{Success: false}, err
 	}
-	defer os.Remove(credentialsFile)
+	defer os.Remove(credentialsFile) //nolint:errcheck // best-effort removal of temporary credentials
 	filename := paramDefault(ctx.Params, "OutputFile", fmt.Sprintf("/tmp/%s_backup_%s.sql", db, time.Now().Format("20060102_150405")))
 	cmd := fmt.Sprintf("mysqldump --defaults-extra-file=%s %s > %s 2>&1", credentialsFile, db, filename)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
@@ -61,7 +61,7 @@ func writeMySQLDefaults(service config.RuntimeServiceProfile) (string, error) {
 		return "", err
 	}
 	path := file.Name()
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // temporary file cleanup
 	if err := file.Chmod(0o600); err != nil {
 		return "", err
 	}

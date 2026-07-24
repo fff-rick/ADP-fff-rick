@@ -46,7 +46,7 @@ func LoadServiceCatalog(path string) (*ServiceCatalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open services config: %w", err)
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // read-only config file cleanup
 
 	catalog := &ServiceCatalog{profiles: make(map[string]RuntimeServiceProfile)}
 	var current *RuntimeServiceProfile
