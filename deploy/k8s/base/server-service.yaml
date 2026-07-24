@@ -7,8 +7,8 @@ metadata:
     app.kubernetes.io/name: adp-server
     app.kubernetes.io/part-of: adp
 spec:
-  # Public exposure is provided only by a separately managed TLS Ingress.
-  type: ClusterIP
+  # Temporary public access before a TLS Ingress/domain is available.
+  type: NodePort
   selector:
     app.kubernetes.io/name: adp-server
   ports:

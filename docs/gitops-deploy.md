@@ -141,7 +141,7 @@ ports:
 curl http://43.136.82.118:30081/healthz
 ```
 
-当前 GitOps 清单只部署 ADP Server 和 PostgreSQL，不部署 Worker。Worker 可以后续在需要诊断的机器上独立运行，连接 Server 的 gRPC 地址，并使用由 `ADP_AUTH_WORKER_TOKEN` 注入的 token。不要把 token 放在启动命令行、任务 YAML 或日志中；应通过权限为 `0600` 的本地凭据文件或运行时 Secret 注入。
+当前 GitOps 清单只部署 ADP Server 和 PostgreSQL，不部署 Worker。临时无域名访问使用 `http://43.136.82.118:30081`；生产长期入口应改为 TLS Ingress。Worker 可以后续在需要诊断的机器上独立运行，连接 Server 的 gRPC 地址，并使用由 `ADP_AUTH_WORKER_TOKEN` 注入的 token。不要把 token 放在启动命令行、任务 YAML 或日志中；应通过权限为 `0600` 的本地凭据文件或运行时 Secret 注入。
 
 ## 8. 本地验证清单
 
