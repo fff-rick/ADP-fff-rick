@@ -90,14 +90,7 @@ func (c *Client) SetServicesConfigPath(path string) {
 func (c *Client) Run() error {
 	catalog, err := config.LoadServiceCatalog(c.serviceConfigPath)
 	if err != nil {
-		return fmt.Errorf("create grpc client: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-worker-token", c.workerToken)
-	stream, err := adpv1.NewWorkerServiceClient(conn).Stream(ctx)
-	if err != nil {
-		return fmt.Errorf("open worker stream: %w", err)
+		return fmt.Errorf("load services config: %w", err)
 	}
 	c.serviceCatalog = catalog
 	for {
