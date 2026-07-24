@@ -122,7 +122,8 @@ func (c *AIContext) ToPromptSection() string {
 		if service.Name != "" {
 			label = service.Name + " (" + service.Type + ")"
 		}
-		sb.WriteString("- " + label)
+		sb.WriteString("- ")
+		sb.WriteString(label)
 		writePromptField(&sb, "host", service.Host)
 		writePromptField(&sb, "port", service.Port)
 		writePromptField(&sb, "user", service.User)
@@ -140,7 +141,10 @@ func writePromptField(sb *strings.Builder, key, value string) {
 	if value == "" {
 		return
 	}
-	sb.WriteString(", " + key + "=" + value)
+	sb.WriteString(", ")
+	sb.WriteString(key)
+	sb.WriteString("=")
+	sb.WriteString(value)
 }
 
 func writePromptPaths(sb *strings.Builder, key string, paths []PathProfile) {
@@ -159,7 +163,11 @@ func writePromptPaths(sb *strings.Builder, key string, paths []PathProfile) {
 		values = append(values, name+":"+item.Path)
 	}
 	if len(values) > 0 {
-		sb.WriteString(", " + key + "=[" + strings.Join(values, ", ") + "]")
+		sb.WriteString(", ")
+		sb.WriteString(key)
+		sb.WriteString("=[")
+		sb.WriteString(strings.Join(values, ", "))
+		sb.WriteString("]")
 	}
 }
 
@@ -168,7 +176,10 @@ func writePromptExtra(sb *strings.Builder, extra map[string]string) {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 			continue
 		}
-		sb.WriteString(", " + key + "=" + value)
+		sb.WriteString(", ")
+		sb.WriteString(key)
+		sb.WriteString("=")
+		sb.WriteString(value)
 	}
 }
 

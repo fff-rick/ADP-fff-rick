@@ -7,11 +7,11 @@ metadata:
     app.kubernetes.io/name: adp-server
     app.kubernetes.io/part-of: adp
 spec:
-  type: NodePort
+  # Public exposure is provided only by a separately managed TLS Ingress.
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: adp-server
   ports:
     - name: http
       port: 8080
       targetPort: http
-      nodePort: 30081

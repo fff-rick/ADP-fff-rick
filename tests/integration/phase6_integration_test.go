@@ -35,8 +35,8 @@ func TestPhase6Acceptance(t *testing.T) {
 		status := doUserJSON(t, app.Client(), http.MethodPost, app.URL+"/api/v1/tasks/run", token, map[string]any{
 			"input": "backup mysql database daily",
 			"parameters": map[string]string{
-				"Password": "secret",
-				"Database": "demo",
+				"Database":       "demo",
+				"ServiceProfile": "mysql_prod",
 			},
 		}, &runResp)
 		if status != http.StatusAccepted {

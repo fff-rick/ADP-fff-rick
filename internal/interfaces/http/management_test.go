@@ -69,15 +69,15 @@ func TestUserWorkerAndTaskManagementEndpoints(t *testing.T) {
 	status = mustJSONRequest(t, app.Client(), http.MethodPost, app.URL+"/api/v1/tasks/run", operatorToken, map[string]any{
 		"input": "每天备份 mysql 数据库",
 		"parameters": map[string]string{
-			"Password": "secret",
-			"Database": "demo",
+			"Database":       "demo",
+			"ServiceProfile": "mysql_prod",
 		},
 	}, &taskRun)
 	if status != http.StatusCreated && status != http.StatusAccepted {
 		t.Fatalf("task run status = %d, want 201 or 202", status)
 	}
-	if taskRun.Job.Parameters["Database"] != "demo" || taskRun.Job.Parameters["Password"] != "secret" {
-		t.Fatalf("expected task parameters to be persisted, got %+v", taskRun.Job.Parameters)
+	if taskRun.Job.Parameters["Database"] != "demo" || taskRun.Job.Parameters["ServiceProfile"] != "mysql_prod" {
+		t.Fatalf("expected non-secret task parameters to be persisted, got %+v", taskRun.Job.Parameters)
 	}
 
 	taskJobs := []model.Job{}

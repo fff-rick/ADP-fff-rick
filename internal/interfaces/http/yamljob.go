@@ -150,15 +150,15 @@ func stripMarkdownFence(value string) string {
 const yamlSystemPrompt = `你是 ADP 运维平台的 YAML 任务生成器。将用户的中文/英文输入转为 ADP YAML。
 
 ## 可用模块（只能从以下选择，禁止编造）
-- mysql_backup: MySQL 备份 (params: Database*, Password*, User, Host)
-- http_health_check: HTTP 健康检查 (params: URL*)
-- check_process: 检查进程 (params: Process*)
-- check_port: 检查端口 (params: Port*)
-- read_log_tail: 读取日志 (params: LogFile*, Lines)
-- redis_ping: Redis PING (params: Host)
-- redis_info: Redis INFO (params: Host)
-- redis_slowlog_get: Redis 慢查询 (params: Host, Count)
-- redis_client_list: Redis 客户端 (params: Host)
+- mysql_backup: MySQL 备份 (params: Database*, ServiceProfile*)
+- http_health_check: HTTP 健康检查 (params: ServiceProfile*)
+- check_process: 检查进程 (params: ServiceProfile*)
+- check_port: 检查端口 (params: ServiceProfile*)
+- read_log_tail: 读取日志 (params: ServiceProfile*, Lines)
+- redis_ping: Redis PING (params: ServiceProfile*)
+- redis_info: Redis INFO (params: ServiceProfile*, Section)
+- redis_slowlog_get: Redis 慢查询 (params: ServiceProfile*, Count)
+- redis_client_list: Redis 客户端 (params: ServiceProfile*)
 
 ## 输出格式（纯 YAML，禁止 markdown 代码块）
 name: <任务名>
@@ -186,43 +186,31 @@ func ruleBasedYAML(input string) (string, *YAMLJobSpec) {
 			spec.Name = "MySQL 数据库备份"
 			spec.Tasks = []YAMLTask{{
 				Name: "备份 MySQL", Template: "mysql_backup",
-				Parameters: map[string]string{"Database": "mydb", "Password": "secret", "User": "root", "Host": "127.0.0.1"},
+				Parameters: map[string]string{"Database": "mydb", "ServiceProfile": "mysql_prod"},
 			}}
 		}
 	case strings.Contains(lower, "nginx"):
 		spec.Name = "Nginx 诊断"
 		spec.Tasks = []YAMLTask{
-			{Name: "检查进程", Template: "check_process", Parameters: map[string]string{"Process": "nginx"}},
-			{Name: "检查端口", Template: "check_port", Parameters: map[string]string{"Port": "80"}},
-			{Name: "健康检查", Template: "http_health_check", Parameters: map[string]string{"URL": "http://127.0.0.1"}},
+			{Name: "检查进程", Template: "check_process", Parameters: map[string]string{"ServiceProfile": "nginx_prod"}},
+			{Name: "检查端口", Template: "check_port", Parameters: map[string]string{"ServiceProfile": "nginx_prod"}},
+			{Name: "健康检查", Template: "http_health_check", Parameters: map[string]string{"ServiceProfile": "adp_http"}},
 		}
 	case strings.Contains(lower, "redis"):
 		spec.Name = "Redis 诊断"
 		spec.Tasks = []YAMLTask{
-			{Name: "PING", Template: "redis_ping", Parameters: map[string]string{"Host": "127.0.0.1"}},
-			{Name: "内存信息", Template: "redis_info", Parameters: map[string]string{"Host": "127.0.0.1"}},
-			{Name: "慢查询", Template: "redis_slowlog_get", Parameters: map[string]string{"Host": "127.0.0.1", "Count": "10"}},
+			{Name: "PING", Template: "redis_ping", Parameters: map[string]string{"ServiceProfile": "redis_prod"}},
+			{Name: "内存信息", Template: "redis_info", Parameters: map[string]string{"ServiceProfile": "redis_prod"}},
+			{Name: "慢查询", Template: "redis_slowlog_get", Parameters: map[string]string{"ServiceProfile": "redis_prod", "Count": "10"}},
 		}
 	case strings.Contains(lower, "端口") || strings.Contains(lower, "port"):
 		spec.Name = "端口检查"
-		port := "80"
-		if strings.Contains(lower, "3306") {
-			port = "3306"
-		} else if strings.Contains(lower, "6379") {
-			port = "6379"
-		}
-		spec.Tasks = []YAMLTask{{Name: "检查端口", Template: "check_port", Parameters: map[string]string{"Port": port}}}
+		spec.Tasks = []YAMLTask{{Name: "检查端口", Template: "check_port", Parameters: map[string]string{"ServiceProfile": "nginx_prod"}}}
 	case strings.Contains(lower, "进程") || strings.Contains(lower, "process"):
-		proc := "nginx"
-		if strings.Contains(lower, "mysql") {
-			proc = "mysqld"
-		} else if strings.Contains(lower, "redis") {
-			proc = "redis-server"
-		}
-		spec.Tasks = []YAMLTask{{Name: "检查进程", Template: "check_process", Parameters: map[string]string{"Process": proc}}}
+		spec.Tasks = []YAMLTask{{Name: "检查进程", Template: "check_process", Parameters: map[string]string{"ServiceProfile": "nginx_prod"}}}
 	default:
 		spec.Name = input
-		spec.Tasks = []YAMLTask{{Name: "健康检查", Template: "http_health_check", Parameters: map[string]string{"URL": "http://127.0.0.1"}}}
+		spec.Tasks = []YAMLTask{{Name: "健康检查", Template: "http_health_check", Parameters: map[string]string{"ServiceProfile": "adp_http"}}}
 	}
 
 	// Build YAML string.
@@ -338,6 +326,10 @@ func (s *Server) createJobsFromSpec(w http.ResponseWriter, r *http.Request, spec
 		targets = []string{""}
 	}
 	for _, task := range spec.Tasks {
+		if err := model.ValidateNoInlineSecrets(task.Parameters); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		tmpl, cmd, err := s.templateEng.Render(task.Template, task.Parameters)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -422,6 +414,9 @@ func (s *Server) validateAndFixYAML(spec *YAMLJobSpec) error {
 					}
 				}
 			}
+		}
+		if err := model.ValidateServiceProfile(task.Template, task.Parameters); err != nil {
+			return fmt.Errorf("task %d: %w", i+1, err)
 		}
 	}
 	if spec.WorkerType == "" {

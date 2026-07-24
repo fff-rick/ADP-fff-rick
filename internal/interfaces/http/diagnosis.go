@@ -127,6 +127,14 @@ func (s *Server) handleExecuteDiagnosisPlan(w http.ResponseWriter, r *http.Reque
 	needsApproval := false
 
 	for i, step := range updatedPlan.Steps {
+		if err := model.ValidateNoInlineSecrets(step.Parameters); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("step %d: %w", step.StepNo, err))
+			return
+		}
+		if err := model.ValidateServiceProfile(step.TemplateCode, step.Parameters); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("step %d: %w", step.StepNo, err))
+			return
+		}
 		if err := s.policyEng.ValidateTemplate(step.TemplateCode); err != nil {
 			writeError(w, http.StatusForbidden, fmt.Errorf("step %d: %w", step.StepNo, err))
 			return

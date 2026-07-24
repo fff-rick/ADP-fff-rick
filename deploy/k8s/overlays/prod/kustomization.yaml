@@ -5,6 +5,8 @@ namespace: adp
 
 resources:
   - ../../base
+  - secrets/sealed-postgres-secret.yaml
+  - secrets/sealed-adp-server-secret.yaml
 
 images:
   - name: ghcr.io/fff-rick/adp-server

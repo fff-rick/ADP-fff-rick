@@ -51,6 +51,8 @@ Settings -> Actions -> General -> Workflow permissions -> Read and write permiss
 
 ## 5. 在集群创建真实 Secret
 
+> 真实凭据只能由受控 Secret 系统创建，不能写入 PR、Kustomize overlay 或任务 YAML。生产发布前应使用 SOPS/External Secrets 等受审计方案替代下方的一次性手工命令；手工创建后也不得将导出的 Secret 回传仓库。
+
 不要把明文 Secret 提交到 Git。第一版可以先手工创建：
 
 ```bash
@@ -139,7 +141,7 @@ ports:
 curl http://43.136.82.118:30081/healthz
 ```
 
-当前 GitOps 清单只部署 ADP Server 和 PostgreSQL，不部署 Worker。Worker 可以后续在需要诊断的机器上独立运行，连接 Server 的 gRPC 地址，并使用和 `ADP_AUTH_WORKER_TOKEN` 相同的 token。
+当前 GitOps 清单只部署 ADP Server 和 PostgreSQL，不部署 Worker。Worker 可以后续在需要诊断的机器上独立运行，连接 Server 的 gRPC 地址，并使用由 `ADP_AUTH_WORKER_TOKEN` 注入的 token。不要把 token 放在启动命令行、任务 YAML 或日志中；应通过权限为 `0600` 的本地凭据文件或运行时 Secret 注入。
 
 ## 8. 本地验证清单
 

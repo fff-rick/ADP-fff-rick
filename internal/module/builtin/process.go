@@ -22,7 +22,7 @@ func (m *CheckProcess) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *CheckProcess) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "Process", Description: "进程名", Required: true}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Nginx Profile", Required: true}}
 }
 func (m *CheckProcess) Check(ctx module.ExecContext) (module.CheckResult, error) {
 	proc := paramFirst(ctx.Params, "", "Process", "ProcessName")
@@ -56,7 +56,7 @@ func (m *CheckPort) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *CheckPort) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "Port", Description: "端口号", Required: true}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Nginx Profile", Required: true}}
 }
 func (m *CheckPort) Check(ctx module.ExecContext) (module.CheckResult, error) {
 	port := ctx.Params["Port"]
@@ -92,7 +92,7 @@ func (m *HTTPHealthCheck) RiskProfile() module.RiskProfile {
 	return module.RiskProfile{Level: model.RiskLevelLow, Reversible: true, ImpactScope: "single_host"}
 }
 func (m *HTTPHealthCheck) Parameters() []module.ParamDef {
-	return []module.ParamDef{{Name: "URL", Description: "检查的 URL", Required: true}}
+	return []module.ParamDef{{Name: "ServiceProfile", Description: "Worker services.cnf 中的 HTTP Profile", Required: true}}
 }
 func (m *HTTPHealthCheck) Check(_ module.ExecContext) (module.CheckResult, error) {
 	return module.CheckResult{NeedsChange: true, CurrentState: "will check HTTP endpoint"}, nil
@@ -124,7 +124,7 @@ func (m *ReadLogTail) RiskProfile() module.RiskProfile {
 }
 func (m *ReadLogTail) Parameters() []module.ParamDef {
 	return []module.ParamDef{
-		{Name: "LogFile", Description: "日志文件路径", Required: true},
+		{Name: "ServiceProfile", Description: "Worker services.cnf 中的 Nginx Profile", Required: true},
 		{Name: "Lines", Description: "读取行数", Required: false, Default: "50"},
 	}
 }

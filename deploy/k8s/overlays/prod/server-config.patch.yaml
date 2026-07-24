@@ -4,5 +4,6 @@ metadata:
   name: adp-server-config
   namespace: adp
 data:
+  ADP_ENV: "production"
   ADP_LLM_BASE_URL: "https://api.deepseek.com"
   ADP_LLM_MODEL: "deepseek-v4-pro"

@@ -1,0 +1,29 @@
+# Copy to /etc/adp/services.cnf on each Worker. Do not commit the real file.
+# The Worker accepts only profile names from tasks; it never accepts a file path
+# or inline credentials from the control plane.
+
+[mysql_prod]
+type = mysql
+host = mysql.prod.internal
+port = 3306
+user = adp_backup
+password = <set-in-secret-manager>
+
+[redis_prod]
+type = redis
+host = redis.prod.internal
+port = 6379
+password = <set-in-secret-manager>
+
+[nginx_prod]
+type = nginx
+host = 127.0.0.1
+port = 80
+process = nginx
+log_file = /var/log/nginx/error.log
+
+[adp_http]
+type = http
+host = adp.internal
+port = 8080
+url = http://adp.internal:8080/healthz

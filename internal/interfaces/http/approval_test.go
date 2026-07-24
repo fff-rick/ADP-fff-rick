@@ -33,8 +33,8 @@ func TestTaskApprovalFlow(t *testing.T) {
 	status := mustJSONRequest(t, app.Client(), http.MethodPost, app.URL+"/api/v1/tasks/run", token, map[string]any{
 		"input": "每天备份 mysql 数据库",
 		"parameters": map[string]string{
-			"Password": "secret",
-			"Database": "demo",
+			"Database":       "demo",
+			"ServiceProfile": "mysql_prod",
 		},
 	}, &runResp)
 	if status != http.StatusAccepted {

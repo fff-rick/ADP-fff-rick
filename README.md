@@ -159,10 +159,10 @@ go run ./cmd/worker run --config configs/worker/adp.yaml
 
 Worker 会连接 `configs/worker/adp.yaml` 中的 `grpc_server_addr`，通过 gRPC 双向流完成注册、心跳、接收任务和回传执行结果。
 
-3. 默认开发账号：
+3. 初始管理员账号：
 
-- 用户名：`admin`
-- 密码：`admin123`
+- 用户名默认是 `admin`，可通过 `ADP_AUTH_ADMIN_USERNAME` 覆盖。
+- 必须通过受保护的运行时 Secret 设置 `ADP_AUTH_ADMIN_PASSWORD`；项目不再提供可用的默认密码。
 
 4. 配置参考：
 

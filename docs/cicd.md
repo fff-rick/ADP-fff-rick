@@ -135,7 +135,7 @@ deploy/k8s/
     worker-deployment.yaml
   overlays/prod/
     kustomization.yaml           # images override → ghcr.io/fff-rick/*
-    image-pull-secrets.yaml      # 镜像拉取密钥（镜像为 public 时可省略）
+    secrets/                     # SealedSecret 密文（镜像为 public 时可省略 GHCR 拉取密钥）
     adp-runtime.env              # 明文模板（不提交 Git）
     sealed-adp-runtime.yaml      # SealedSecret（加密后提交 Git）
   argocd/
@@ -161,7 +161,7 @@ ADP_SERVER_ADDR=:8080
 ADP_ADMIN_USERNAME=admin
 ADP_ADMIN_PASSWORD=<your-password>
 ADP_AUTH_SECRET=<random-string>
-ADP_WORKER_SHARED_TOKEN=<random-string>
+ADP_AUTH_WORKER_TOKEN=<random-string>
 ADP_SERVER_URL=http://adp-server:8080
 ADP_WORKER_NAME=worker-prod-1
 ADP_WORKER_TYPE=shell

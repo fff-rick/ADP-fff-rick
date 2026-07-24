@@ -79,8 +79,9 @@
                   </div>
                 </div>
                 <div class="field-group">
-                  <label class="field-label" for="ssh-password">SSH 密码</label>
-                  <input class="field-input" id="ssh-password" name="ssh-password" type="password" placeholder="输入 SSH 密码">
+                  <label class="field-label" for="ssh-key-file">服务器端 SSH 私钥路径</label>
+                  <input class="field-input" id="ssh-key-file" name="ssh-key-file" placeholder="/etc/adp/ssh/worker-deploy">
+                  <p class="field-hint">密钥必须预先以受保护文件挂载到 Server；页面不会上传密码或私钥。</p>
                 </div>
                 <div class="field-group" style="display: flex; align-items: center; gap: 8px;">
                   <input type="checkbox" id="worker-log-to-db" name="worker-log-to-db" style="width: 16px; height: 16px;">

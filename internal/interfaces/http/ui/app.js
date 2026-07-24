@@ -232,7 +232,7 @@ async function handleCreateWorker(event) {
       body.ssh_host = valueOf("ssh-host");
       body.ssh_port = sshPort;
       body.ssh_user = valueOf("ssh-user");
-      body.ssh_password = valueOf("ssh-password");
+      body.ssh_key_file = valueOf("ssh-key-file");
       body.log_to_db = document.getElementById("worker-log-to-db").checked;
     }
 
@@ -348,7 +348,7 @@ async function handleYAMLJobSubmit(event) {
 
 // Template code → natural language prompt mapping.
 var templatePrompts = {
-  mysql_backup:          { prompt: "每天备份 mysql 数据库", params: '{"Database":"demo","Password":"secret"}' },
+  mysql_backup:          { prompt: "每天备份 mysql 数据库", params: '{"Database":"demo","ServiceProfile":"mysql_prod"}' },
   http_health_check:     { prompt: "检查 http://127.0.0.1 是否正常",  params: '{"URL":"http://127.0.0.1"}' },
   check_process:         { prompt: "检查 nginx 进程是否运行",       params: '{"Process":"nginx"}' },
   check_port:            { prompt: "检查 80 端口是否监听",          params: '{"Port":"80"}' },

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"adp/internal/config"
 	"adp/internal/domain/model"
 )
 
@@ -13,6 +14,7 @@ type ExecContext struct {
 	Params     map[string]string
 	WorkerInfo model.HostInfo
 	Timeout    time.Duration
+	Service    *config.RuntimeServiceProfile
 }
 
 // Result is the outcome of a module execution.

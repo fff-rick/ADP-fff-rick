@@ -17,12 +17,21 @@ spec:
         app.kubernetes.io/name: adp-server
         app.kubernetes.io/part-of: adp
     spec:
+      serviceAccountName: adp-server
+      automountServiceAccountToken: false
       imagePullSecrets:
         - name: ghcr-pull-secret
       containers:
         - name: adp-server
           image: ghcr.io/fff-rick/adp-server:v1.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
           ports:
             - name: http
               containerPort: 8080
@@ -33,7 +42,10 @@ spec:
                 name: adp-server-config
             - secretRef:
                 name: adp-server-secret
+          # Go's default temp directory must remain writable with a read-only root filesystem.
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: ai-context
               mountPath: /etc/adp/ai
               readOnly: true
@@ -57,6 +69,8 @@ spec:
               cpu: 500m
               memory: 512Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: ai-context
           configMap:
             name: adp-ai-context

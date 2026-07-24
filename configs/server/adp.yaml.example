@@ -8,9 +8,9 @@ db:
 
 auth:
   admin_username: "admin"
-  admin_password: "admin123"
-  secret: "adp-dev-secret"
-  worker_token: "adp-worker-secret"
+  admin_password: "<set-in-secret-manager>"
+  secret: "<set-in-secret-manager>"
+  worker_token: "<set-in-secret-manager>"
 
 llm:
   base_url: ""

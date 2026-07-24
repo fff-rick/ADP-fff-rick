@@ -2,9 +2,12 @@ package builtin
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
+	"adp/internal/config"
 	"adp/internal/domain/model"
 	"adp/internal/module"
 )
@@ -22,9 +25,7 @@ func (m *MySQLBackup) RiskProfile() module.RiskProfile {
 func (m *MySQLBackup) Parameters() []module.ParamDef {
 	return []module.ParamDef{
 		{Name: "Database", Description: "数据库名", Required: true},
-		{Name: "Password", Description: "数据库密码", Required: true},
-		{Name: "User", Description: "数据库用户", Required: false, Default: "root"},
-		{Name: "Host", Description: "数据库主机", Required: false, Default: "127.0.0.1"},
+		{Name: "ServiceProfile", Description: "Worker services.cnf 中的 MySQL Profile", Required: true},
 	}
 }
 func (m *MySQLBackup) Check(ctx module.ExecContext) (module.CheckResult, error) {
@@ -33,17 +34,42 @@ func (m *MySQLBackup) Check(ctx module.ExecContext) (module.CheckResult, error) 
 }
 func (m *MySQLBackup) Execute(ctx module.ExecContext) (module.Result, error) {
 	db := ctx.Params["Database"]
-	pw := ctx.Params["Password"]
-	user := paramDefault(ctx.Params, "User", "root")
-	host := paramDefault(ctx.Params, "Host", "127.0.0.1")
-	port := paramDefault(ctx.Params, "Port", "3306")
+	if ctx.Service == nil || ctx.Service.Type != "mysql" {
+		return module.Result{Success: false}, fmt.Errorf("mysql_backup requires a Worker-local mysql ServiceProfile")
+	}
+	service := ctx.Service
+	credentialsFile, err := writeMySQLDefaults(*service)
+	if err != nil {
+		return module.Result{Success: false}, err
+	}
+	defer os.Remove(credentialsFile)
 	filename := paramDefault(ctx.Params, "OutputFile", fmt.Sprintf("/tmp/%s_backup_%s.sql", db, time.Now().Format("20060102_150405")))
-	cmd := fmt.Sprintf("mysqldump -h %s -P %s -u %s -p'%s' %s > %s 2>&1", host, port, user, pw, db, filename)
+	cmd := fmt.Sprintf("mysqldump --defaults-extra-file=%s %s > %s 2>&1", credentialsFile, db, filename)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
 		return module.Result{Success: false, Output: string(out), Facts: map[string]string{"backup_file": filename}}, nil
 	}
 	return module.Result{Success: true, Output: string(out), Changed: true, Facts: map[string]string{"backup_file": filename}}, nil
+}
+
+func writeMySQLDefaults(service config.RuntimeServiceProfile) (string, error) {
+	if service.User == "" || service.Password == "" {
+		return "", fmt.Errorf("mysql ServiceProfile %q requires user and password", service.Name)
+	}
+	file, err := os.CreateTemp("", "adp-mysql-*.cnf")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	defer file.Close()
+	if err := file.Chmod(0o600); err != nil {
+		return "", err
+	}
+	content := fmt.Sprintf("[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n", service.Host, service.Port, service.User, service.Password)
+	if _, err := file.WriteString(content); err != nil {
+		return "", err
+	}
+	return filepath.Clean(path), nil
 }
 func (m *MySQLBackup) DryRun(ctx module.ExecContext) (module.Result, error) {
 	db := paramDefault(ctx.Params, "Database", "???")

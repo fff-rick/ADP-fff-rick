@@ -17,6 +17,7 @@ import (
 	"time"
 
 	adpv1 "adp/api/proto/adp/v1"
+	"adp/internal/config"
 	"adp/internal/domain/model"
 	"adp/internal/module"
 	"adp/internal/module/builtin"
@@ -40,6 +41,8 @@ type Client struct {
 	hostCollectInterval time.Duration
 	logToDB             bool
 	moduleReg           *module.Registry // module registry for idempotent execution
+	serviceConfigPath   string
+	serviceCatalog      *config.ServiceCatalog
 }
 
 // NewClient creates a new worker client.
@@ -55,6 +58,7 @@ func NewClient(serverURL, workerToken, name, workerType string, pollInterval tim
 		execTimeout:         30 * time.Second,
 		hostCollectInterval: 60 * time.Second,
 		moduleReg:           builtin.NewRegistry(),
+		serviceConfigPath:   config.DefaultServicesConfigPath,
 	}
 }
 
@@ -75,8 +79,20 @@ func (c *Client) SetHostCollectInterval(d time.Duration) { c.hostCollectInterval
 // SetLogToDB enables or disables sending job logs to the server database.
 func (c *Client) SetLogToDB(enabled bool) { c.logToDB = enabled }
 
+// SetServicesConfigPath sets the only Worker-local service configuration file.
+func (c *Client) SetServicesConfigPath(path string) {
+	if strings.TrimSpace(path) != "" {
+		c.serviceConfigPath = path
+	}
+}
+
 // Run starts the worker main loop.
 func (c *Client) Run() error {
+	catalog, err := config.LoadServiceCatalog(c.serviceConfigPath)
+	if err != nil {
+		return err
+	}
+	c.serviceCatalog = catalog
 	for {
 		if err := c.runGRPCStream(); err != nil {
 			log.Printf("[worker:%s] gRPC stream disconnected: %v", c.registeredID, err)
@@ -200,10 +216,15 @@ func (c *Client) executeJob(job model.Job) {
 func (c *Client) executeJobLocally(job model.Job) (bool, string) {
 	if job.TemplateCode != "" {
 		if mod, err := c.moduleReg.Get(job.TemplateCode); err == nil {
+			params, service, err := c.resolveServiceProfile(job.TemplateCode, job.Parameters)
+			if err != nil {
+				return false, fmt.Sprintf("service profile: %v", err)
+			}
 			ctx := module.ExecContext{
-				Params:     cloneStringMap(job.Parameters),
+				Params:     params,
 				WorkerInfo: c.collectHostInfo(),
 				Timeout:    c.execTimeout,
+				Service:    service,
 			}
 			cr, checkErr := mod.Check(ctx)
 			if checkErr == nil && !cr.NeedsChange {

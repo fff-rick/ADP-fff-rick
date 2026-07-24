@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"adp/internal/domain/model"
@@ -49,12 +50,21 @@ func (s *Server) handleCreateWorker(w http.ResponseWriter, r *http.Request) {
 
 	// ── 远程部署分支 ──
 	if req.SSHHost != "" {
+		if os.Getenv("ADP_ENABLE_REMOTE_WORKER_DEPLOY") != "true" {
+			writeError(w, http.StatusForbidden, errors.New("remote worker deployment is disabled; enable it explicitly only on a private management endpoint"))
+			return
+		}
 		if req.SSHUser == "" {
 			writeError(w, http.StatusBadRequest, errors.New("ssh_user is required for remote deployment"))
 			return
 		}
-		if req.SSHPassword == "" && req.SSHKeyFile == "" {
-			writeError(w, http.StatusBadRequest, errors.New("ssh_password or ssh_key_file is required for remote deployment"))
+		if req.SSHPassword != "" {
+			writeError(w, http.StatusBadRequest, errors.New("ssh_password is not accepted; provision a protected SSH key file on the server instead"))
+			return
+		}
+		keyFile := filepath.Clean(req.SSHKeyFile)
+		if !strings.HasPrefix(keyFile, "/etc/adp/ssh/") {
+			writeError(w, http.StatusBadRequest, errors.New("ssh_key_file must reference a protected key under /etc/adp/ssh/"))
 			return
 		}
 
@@ -70,7 +80,7 @@ func (s *Server) handleCreateWorker(w http.ResponseWriter, r *http.Request) {
 			Port:     req.SSHPort,
 			User:     req.SSHUser,
 			Password: req.SSHPassword,
-			KeyFile:  req.SSHKeyFile,
+			KeyFile:  keyFile,
 		}
 
 		spec := deploy.WorkerSpec{
