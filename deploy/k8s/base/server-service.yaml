@@ -16,3 +16,7 @@ spec:
       port: 8080
       targetPort: http
       nodePort: 30081
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+      nodePort: 30090
