@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull-secret
       containers:
         - name: adp-server
-          image: ghcr.io/fff-rick/adp-server:v1.0
+          image: ghcr.io/fff-rick/adp-server:v1.1
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
